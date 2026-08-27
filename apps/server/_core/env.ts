@@ -32,12 +32,9 @@ export const env = {
   // Used by getPublicBaseUrl() (see _core/public-url.ts) to build absolute
   // callback / webhook URLs (e.g. payment providers). Empty until injected.
   PUBLIC_BACKEND_URL: readEnv(process.env.PUBLIC_BACKEND_URL) ?? "",
-  SKYBASE_DB_ENDPOINT: readEnv(process.env.SKYBASE_DB_ENDPOINT) ?? "",
-  SKYBASE_DB_TOKEN: readEnv(process.env.SKYBASE_DB_AUTH_TOKEN, process.env.SKYBASE_DB_TOKEN) ?? "",
-  SKYBASE_DB_NAMESPACE: readEnv(process.env.SKYBASE_DB_NAMESPACE) ?? "",
-  SKYWORK_GATEWAY_BASE_URL: readEnv(process.env.SKYWORK_GATEWAY_BASE_URL) ?? "https://api-inn.skywork.ai/gateway",
-  SKYWORK_API_TOKEN: readEnv(process.env.SKYWORK_API_TOKEN) ?? "",
-  SKYWORK_AI_BASE_URL: readEnv(process.env.SKYWORK_AI_BASE_URL) ?? "https://api.skywork.ai/skycowork-llm/",
+  DATABASE_ENDPOINT: readEnv(process.env.DATABASE_ENDPOINT) ?? "",
+  DATABASE_TOKEN: readEnv(process.env.DATABASE_TOKEN) ?? "",
+  DATABASE_NAMESPACE: readEnv(process.env.DATABASE_NAMESPACE) ?? "",
   GOOGLE_CLIENT_ID:
     readEnv(process.env.GOOGLE_CLIENT_ID, process.env.VITE_GOOGLE_CLIENT_ID, viteEnv.VITE_GOOGLE_CLIENT_ID) ?? "",
   GOOGLE_CLIENT_SECRET: readEnv(process.env.GOOGLE_CLIENT_SECRET) ?? ""

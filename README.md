@@ -9,7 +9,7 @@ Install dependencies from the repository root, then start the Vite app:
 
 ```bash
 pnpm install
-pnpm --filter client dev
+pnpm --dir apps/client dev
 ```
 
 The web experience includes the public landing pages, transport request wizard,

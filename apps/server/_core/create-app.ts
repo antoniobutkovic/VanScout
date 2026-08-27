@@ -11,7 +11,7 @@ import { apiFailure } from "@repo/shared/http";
 const app = new Hono({ strict: false });
 
 // The client site and this backend are deployed on different registrable
-// domains by design (skywork.website vs the FC subdomain), so cross-origin is
+// domains by design (the web client and API are separate deployments), so cross-origin is
 // the normal case, not the exception. Auth rides the Authorization header
 // (bearer token, no cookies), which the browser never attaches automatically
 // — an origin allow-list adds no CSRF protection here and only breaks the
@@ -30,7 +30,7 @@ app.use(
 app.options("/api/auth/*", (c) => c.body(null, 204));
 app.on(["GET", "POST"], "/api/auth/*", (c) => {
   if (!isDatabaseConfigured()) {
-    return c.json(apiFailure("DATABASE_UNCONFIGURED", "Skybase database runtime env is not configured"), 503);
+    return c.json(apiFailure("DATABASE_UNCONFIGURED", "Database runtime env is not configured"), 503);
   }
 
   return getAuth().handler(c.req.raw);

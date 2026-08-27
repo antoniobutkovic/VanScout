@@ -35,12 +35,12 @@ let db: LibSQLDatabase<typeof schema> | null = null;
 type FetchInput = Parameters<typeof fetch>[0];
 
 export function isDatabaseConfigured() {
-  return Boolean(env.SKYBASE_DB_ENDPOINT && env.SKYBASE_DB_TOKEN && env.SKYBASE_DB_NAMESPACE);
+  return Boolean(env.DATABASE_ENDPOINT && env.DATABASE_TOKEN && env.DATABASE_NAMESPACE);
 }
 
 function assertConfigured() {
   if (!isDatabaseConfigured()) {
-    throw new DatabaseError("DATABASE_UNCONFIGURED", "Skybase database runtime env is not configured", 503);
+    throw new DatabaseError("DATABASE_UNCONFIGURED", "Database runtime env is not configured", 503);
   }
 }
 
@@ -49,9 +49,9 @@ function getClient() {
 
   if (!client) {
     client = createClient({
-      url: env.SKYBASE_DB_ENDPOINT,
-      authToken: env.SKYBASE_DB_TOKEN,
-      fetch: createNamespaceFetch(env.SKYBASE_DB_NAMESPACE)
+      url: env.DATABASE_ENDPOINT,
+      authToken: env.DATABASE_TOKEN,
+      fetch: createNamespaceFetch(env.DATABASE_NAMESPACE)
     });
   }
 
@@ -73,7 +73,7 @@ function mapLibsqlError(error: unknown): DatabaseError {
     return error;
   }
 
-  const message = error instanceof Error ? error.message : "Skybase database query failed";
+  const message = error instanceof Error ? error.message : "Database query failed";
   return new DatabaseError("DATABASE_QUERY_FAILED", message, 502);
 }
 

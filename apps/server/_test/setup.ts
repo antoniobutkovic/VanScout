@@ -22,9 +22,9 @@ const TEST_DB_URL = ":memory:";
 
 // Use ??= so an external runner can override (e.g. point at a Docker
 // libsql-server for the Phase 0 :memory: vs production comparison experiment).
-process.env.SKYBASE_DB_ENDPOINT ??= TEST_DB_URL;
-process.env.SKYBASE_DB_TOKEN ??= "test-token";
-process.env.SKYBASE_DB_NAMESPACE ??= "test-ns";
+process.env.DATABASE_ENDPOINT ??= TEST_DB_URL;
+process.env.DATABASE_TOKEN ??= "test-token";
+process.env.DATABASE_NAMESPACE ??= "test-ns";
 process.env.BETTER_AUTH_SECRET ??= "test-better-auth-secret-32-chars-or-more-fixed";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3001/api/auth";
 process.env.ALLOWED_ORIGINS ??= "http://localhost:3000";

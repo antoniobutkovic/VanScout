@@ -4,7 +4,6 @@ import { bearer, openAPI, username } from "better-auth/plugins";
 import * as schema from "../db/schema";
 import { getDb } from "./db";
 import { env } from "./env";
-import { isThirdPartyGoogleAuthConfigured } from "../services/third-party-google-auth";
 
 export type AuthUser = {
   id: string;
@@ -32,7 +31,7 @@ const socialProviders =
     : {};
 
 export const enabledSocialProviders = Object.keys(socialProviders);
-export const enabledThirdPartySocialProviders = isThirdPartyGoogleAuthConfigured() ? ["google"] : [];
+export const enabledThirdPartySocialProviders: string[] = [];
 
 // Better Auth runs its own origin allow-list on top of the Hono CORS
 // middleware: non-GET auth requests whose Origin header (or callbackURL)

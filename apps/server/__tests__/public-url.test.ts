@@ -12,10 +12,10 @@ afterEach(() => {
 
 describe("getPublicBaseUrl", () => {
   it("returns the deploy-injected PUBLIC_BACKEND_URL with the trailing slash trimmed", async () => {
-    process.env.PUBLIC_BACKEND_URL = "https://abc-test.skywork.me/";
+    process.env.PUBLIC_BACKEND_URL = "https://api.movago.example/";
     const { getPublicBaseUrl } = await loadHelper();
 
-    expect(getPublicBaseUrl()).toBe("https://abc-test.skywork.me");
+    expect(getPublicBaseUrl()).toBe("https://api.movago.example");
   });
 
   it("returns an empty string when PUBLIC_BACKEND_URL is not set", async () => {
