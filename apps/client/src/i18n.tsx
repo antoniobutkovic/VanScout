@@ -338,7 +338,9 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<Language>(() => {
     const stored = window.localStorage.getItem("movago-language");
-    return stored === "hr" ? "hr" : "en";
+    if (stored === "hr" || stored === "en") return stored;
+    const browserLanguage = window.navigator.languages?.[0] ?? window.navigator.language;
+    return browserLanguage.toLowerCase().startsWith("hr") ? "hr" : "en";
   });
 
   useEffect(() => {
@@ -366,10 +368,9 @@ export function useLanguage() {
 export function LanguagePicker() {
   const { language, setLanguage, t } = useLanguage();
   return <label className="language-picker">
-    <span>{t("Language")}</span>
     <select value={language} onChange={(event) => setLanguage(event.target.value as Language)} aria-label={t("Language")}>
-      <option value="en">{t("English")}</option>
-      <option value="hr">{t("Croatian")}</option>
+      <option value="en">🇬🇧</option>
+      <option value="hr">🇭🇷</option>
     </select>
   </label>;
 }

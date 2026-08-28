@@ -19,7 +19,7 @@ function Avatar({ offer, large = false }: { offer?: Offer; large?: boolean }) { 
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
   const { t } = useLanguage();
-  return <div className="nav-actions"><LanguagePicker />{kind ? <><button className="notice" aria-label={t("Notifications")}>◌</button><Link className="mini-avatar" to={kind === "carrier" ? "/carrier/profile" : "/customer/profile"}>{kind === "carrier" ? "MM" : "AN"}</Link>{kind === "customer" && <Link className="button dark short" to="/create-request">{t("New request")}</Link>}</> : <><Link className="sign-in" to="/auth">{t("Sign in")}</Link><Link className="button dark short" to="/create-request">{t("Request transport")}</Link></>}</div>;
+  return <div className="nav-actions">{kind ? <><button className="notice" aria-label={t("Notifications")}>◌</button><Link className="mini-avatar" to={kind === "carrier" ? "/carrier/profile" : "/customer/profile"}>{kind === "carrier" ? "MM" : "AN"}</Link>{kind === "customer" && <Link className="button dark short" to="/create-request">{t("New request")}</Link>}</> : <><Link className="sign-in" to="/auth">{t("Sign in")}</Link><Link className="button dark short" to="/create-request">{t("Request transport")}</Link></>}<LanguagePicker /></div>;
 }
 function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: string }) {
   const { t } = useLanguage();
