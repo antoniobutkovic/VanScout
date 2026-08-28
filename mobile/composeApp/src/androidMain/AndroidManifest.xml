@@ -12,7 +12,7 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:exported="true"
-            android:name="com.strive.movago.MainActivity">
+            android:name="com.strive.vanscout.MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

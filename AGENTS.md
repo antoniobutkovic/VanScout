@@ -1,4 +1,4 @@
-# Movago project guide
+# VanScout project guide
 
 ## Web app
 
@@ -6,7 +6,7 @@
 - It is a React 19 + TypeScript + Vite app with UI in `src/` and static assets
   in `public/`.
 - Keep product UI in `src/pages` and shared visual primitives in `src`.
-- Keep the visual language aligned with the Movago reference: warm paper
+- Keep the visual language aligned with the VanScout reference: warm paper
   background, moss green actions, clay accents, editorial typography, generous
   spacing, and responsive layouts.
 - Use `npm run dev` for local development and `npm run build` for a production

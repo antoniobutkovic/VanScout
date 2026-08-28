@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		42CAE799B90FC7E419A5A81E /* movago.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = movago.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		42CAE799B90FC7E419A5A81E /* VanScout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VanScout.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -59,7 +59,7 @@
 		61BA712D4F59A298AD58E950 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				42CAE799B90FC7E419A5A81E /* movago.app */,
+				42CAE799B90FC7E419A5A81E /* VanScout.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,7 +87,7 @@
 			packageProductDependencies = (
 			);
 			productName = iosApp;
-			productReference = 42CAE799B90FC7E419A5A81E /* movago.app */;
+			productReference = 42CAE799B90FC7E419A5A81E /* VanScout.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */

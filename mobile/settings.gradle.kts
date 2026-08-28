@@ -1,4 +1,4 @@
-rootProject.name = "movago"
+rootProject.name = "vanscout"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {

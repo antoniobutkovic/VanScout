@@ -1,6 +1,6 @@
 # Architecture Rules
 
-This project uses a small feature-based architecture in `composeApp/src/commonMain/kotlin/com/strive/movago`.
+This project uses a small feature-based architecture in `composeApp/src/commonMain/kotlin/com/strive/vanscout`.
 
 The goal is consistency:
 
@@ -15,7 +15,7 @@ The goal is consistency:
 Each feature should live in its own package:
 
 ```text
-com.strive.movago.<feature>/
+com.strive.vanscout.<feature>/
   data/
   ui/
 ```
@@ -106,7 +106,7 @@ If a feature has request or response models, keep the names explicit:
 
 ## Dependency Injection Rules
 
-All shared wiring belongs in [composeApp/src/commonMain/kotlin/com/strive/movago/di/AppComponent.kt](/Users/antonio/AndroidStudioProjects/Movago/mobile/composeApp/src/commonMain/kotlin/com/strive/movago/di/AppComponent.kt).
+All shared wiring belongs in [composeApp/src/commonMain/kotlin/com/strive/vanscout/di/AppComponent.kt](composeApp/src/commonMain/kotlin/com/strive/vanscout/di/AppComponent.kt).
 
 Rules:
 
@@ -159,7 +159,7 @@ Rules:
 
 ## Network Rules
 
-Shared network result handling lives in [composeApp/src/commonMain/kotlin/com/strive/movago/network/Response.kt](/Users/antonio/AndroidStudioProjects/Movago/mobile/composeApp/src/commonMain/kotlin/com/strive/movago/network/Response.kt).
+Shared network result handling lives in [composeApp/src/commonMain/kotlin/com/strive/vanscout/network/Response.kt](composeApp/src/commonMain/kotlin/com/strive/vanscout/network/Response.kt).
 
 Rules:
 

@@ -1,6 +1,6 @@
-# Movago
+# VanScout
 
-Movago includes the existing Kotlin Multiplatform mobile client in `mobile/`,
+VanScout includes the existing Kotlin Multiplatform mobile client in `mobile/`,
 the responsive web client at the repository root, and a Hono backend in `api/`.
 
 ## Web client

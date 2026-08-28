@@ -6,9 +6,10 @@ import {
   CustomerWorkspace,
   HowItWorks,
   Home,
+  LegalPage,
   Registration,
   Tracking,
-} from "./pages/Movago";
+} from "./pages/VanScout";
 
 const App = () => (
   <BrowserRouter>
@@ -21,6 +22,10 @@ const App = () => (
       <Route path="/customer/*" element={<CustomerWorkspace />} />
       <Route path="/carrier/*" element={<CarrierWorkspace />} />
       <Route path="/tracking" element={<Tracking />} />
+      <Route path="/politika-privatnosti" element={<LegalPage document="privacy" />} />
+      <Route path="/politika-o-kolacicima" element={<LegalPage document="cookies" />} />
+      <Route path="/uvjeti-koristenja" element={<LegalPage document="terms" />} />
+      <Route path="/impressum" element={<LegalPage document="impressum" />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   </BrowserRouter>

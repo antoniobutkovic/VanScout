@@ -19,6 +19,17 @@ const CROATIAN: Record<string, string> = {
   "Move big things, simply.": "Velike stvari, jednostavno.",
   "Aug 18": "18. kol",
   Help: "Pomoć",
+  "Legal information": "Pravne informacije",
+  "© 2026 VanScout. All rights reserved.": "© 2026 VanScout. Sva prava pridržana.",
+  "Privacy policy": "Politika privatnosti",
+  "Cookie policy": "Politika o kolačićima",
+  "Terms of use": "Uvjeti korištenja",
+  "Privacy policy introduction": "Informacije o tome kako VanScout prikuplja, koristi i štiti vaše osobne podatke.",
+  "Cookie policy introduction": "Informacije o kolačićima i sličnim tehnologijama koje se koriste na ovoj stranici.",
+  "Terms of use introduction": "Pravila korištenja VanScout platforme i odgovornosti korisnika.",
+  "Impressum introduction": "Osnovne informacije o platformi VanScout i njezinu operatoru.",
+  "This page is being prepared": "Sadržaj ove stranice trenutno se priprema.",
+  Contact: "Kontakt",
   "Transport, without the back and forth.": "Prijevoz, bez natezanja.",
   "Need to move something that won’t fit in your car?": "Trebate premjestiti nešto što ne stane u vaš automobil?",
   "Post what you need moved and receive offers from local carriers.": "Objavite što trebate prevesti i primite ponude lokalnih prijevoznika.",
@@ -56,9 +67,9 @@ const CROATIAN: Record<string, string> = {
   "Create a transport request": "Izradite zahtjev za prijevoz",
   "The simple version": "Jednostavna verzija",
   "From “can someone move this?” to delivered.": "Od „može li netko ovo prevesti?” do dostave.",
-  "Movago makes bulky-item transport feel as easy as buying it in the first place.": "Movago čini prijevoz glomaznih stvari jednostavnim kao i njihovu kupnju.",
+  "VanScout makes bulky-item transport feel as easy as buying it in the first place.": "VanScout čini prijevoz glomaznih stvari jednostavnim kao i njihovu kupnju.",
   "Create a request": "Izradite zahtjev",
-  "Tell Movago what needs to be transported.": "Recite Movagu što treba prevesti.",
+  "Tell VanScout what needs to be transported.": "Recite VanScoutu što treba prevesti.",
   "Set the route": "Postavite rutu",
   "Choose pickup and delivery locations.": "Odaberite lokacije preuzimanja i dostave.",
   "Choose timing": "Odaberite termin",
@@ -71,7 +82,7 @@ const CROATIAN: Record<string, string> = {
   "Good routes. Clear jobs. On your terms.": "Dobre rute. Jasni poslovi. Po vašim uvjetima.",
   "Find nearby transport jobs, choose the work that fits your vehicle, and make offers in minutes.": "Pronađite poslove prijevoza u blizini, odaberite one koji odgovaraju vašem vozilu i pošaljite ponudu u nekoliko minuta.",
   "Start carrying": "Započnite s prijevozom",
-  "See how Movago works": "Pogledajte kako Movago funkcionira",
+  "See how VanScout works": "Pogledajte kako VanScout funkcionira",
   "Only relevant jobs": "Samo relevantni poslovi",
   "Filter by route, day, category and the jobs your vehicle can actually take.": "Filtrirajte prema ruti, danu, kategoriji i poslovima koje vaše vozilo zaista može preuzeti.",
   "Offer on your schedule": "Ponudite prema svom rasporedu",
@@ -157,7 +168,7 @@ const CROATIAN: Record<string, string> = {
   "One quick check": "Brza provjera",
   Digit: "Znamenka",
   "Verify your phone.": "Potvrdite svoj broj telefona.",
-  "We’ll text a six-digit code to keep Movago trusted for everyone.": "Poslat ćemo vam šesteroznamenkasti kod kako bi Movago ostao siguran za sve.",
+  "We’ll text a six-digit code to keep VanScout trusted for everyone.": "Poslat ćemo vam šesteroznamenkasti kod kako bi VanScout ostao siguran za sve.",
   "Phone number": "Broj telefona",
   "Verify and publish": "Potvrdi i objavi",
   "Send a new code": "Pošalji novi kod",
@@ -297,7 +308,7 @@ const CROATIAN: Record<string, string> = {
   "Start delivery": "Započni dostavu",
   "Mark as delivered": "Označi kao dostavljeno",
   Customer: "Korisnik",
-  "Open navigation ↗": "Otvori navigaciju ↗",
+  "Open navigation": "Otvori navigaciju",
   "Share live location with customer": "Podijeli lokaciju uživo s korisnikom",
   "Your customer will receive a private tracking link until delivery is completed.": "Korisnik će primati privatnu poveznicu za praćenje dok se dostava ne završi.",
   Traffic: "Gužva",
@@ -338,16 +349,16 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<Language>(() => {
-    const stored = window.localStorage.getItem("movago-language");
+    const stored = window.localStorage.getItem("vanscout-language");
     if (stored === "hr" || stored === "en") return stored;
     const browserLanguage = window.navigator.languages?.[0] ?? window.navigator.language;
     return browserLanguage.toLowerCase().startsWith("hr") ? "hr" : "en";
   });
 
   useEffect(() => {
-    window.localStorage.setItem("movago-language", language);
+    window.localStorage.setItem("vanscout-language", language);
     document.documentElement.lang = language;
-    document.title = language === "hr" ? "Movago — Velike stvari, jednostavno." : "Movago — Move big things, simply.";
+    document.title = language === "hr" ? "VanScout — Velike stvari, jednostavno." : "VanScout — Move big things, simply.";
     document.querySelector('meta[name="description"]')?.setAttribute("content", language === "hr" ? "Objavite što trebate prevesti i primite ponude lokalnih prijevoznika." : "Post what you need moved and receive offers from local carriers.");
   }, [language]);
 

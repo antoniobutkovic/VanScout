@@ -58,14 +58,14 @@ kotlin {
 }
 
 android {
-    namespace = "com.strive.movago"
+    namespace = "com.strive.vanscout"
     compileSdk =
         libs.versions.android.compileSdk
             .get()
             .toInt()
 
     defaultConfig {
-        applicationId = "com.strive.movago"
+        applicationId = "com.strive.vanscout"
         minSdk =
             libs.versions.android.minSdk
                 .get()
