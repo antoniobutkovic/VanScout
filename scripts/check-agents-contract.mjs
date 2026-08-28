@@ -9,11 +9,11 @@
  *   2. a public export of a contract-covered file is not mentioned in
  *      AGENTS.md (rename/removal without a contract update),
  *   3. the contract's ```sql exemplar is no longer an excerpt of
- *      apps/server/migrations/001_init.sql,
+ *      api/migrations/001_init.sql,
  *   4. a ```ts exemplar imports a symbol that its source module no longer
  *      exports.
  *
- * Run via `pnpm lint` (wired into scripts/lint.mjs) or directly:
+ * Run via `npm run lint` or directly:
  *   node scripts/check-agents-contract.mjs
  */
 
@@ -31,7 +31,7 @@ const CONTRACT_MARKER = "scaffold-contract: v2";
  */
 const COVERED_FILES = [
   {
-    path: "apps/server/_core/db.ts",
+    path: "api/_core/db.ts",
     allow: [
       "SqlArgs",
       "QueryResult",
@@ -51,7 +51,7 @@ const COVERED_FILES = [
     ]
   },
   {
-    path: "apps/server/_core/auth.ts",
+    path: "api/_core/auth.ts",
     allow: [
       "AuthSession",
       "enabledSocialProviders",
@@ -61,17 +61,17 @@ const COVERED_FILES = [
     ]
   },
   {
-    path: "apps/server/_core/route-registry.ts",
+    path: "api/_core/route-registry.ts",
     // Registry internals; the contract documents the *behavior* (auto-mount,
     // isPublic), not these exports.
     allow: ["RouteEntry", "routeEntries", "publicApiPrefixes"]
   },
   {
-    path: "apps/server/middlewares/with-session.ts",
+    path: "api/middlewares/with-session.ts",
     allow: ["PUBLIC_API_PREFIXES"]
   },
   {
-    path: "apps/server/_core/public-url.ts",
+    path: "api/_core/public-url.ts",
     allow: []
   },
   {
@@ -79,23 +79,23 @@ const COVERED_FILES = [
     allow: ["ApiSuccess", "ApiFailure", "ApiResponse"]
   },
   {
-    path: "apps/client/src/lib/api.ts",
+    path: "src/lib/api.ts",
     allow: ["ApiFetchInit"]
   },
   {
-    path: "apps/client/src/lib/api-base.ts",
+    path: "src/lib/api-base.ts",
     allow: []
   },
   {
-    path: "apps/client/src/lib/auth.ts",
+    path: "src/lib/auth.ts",
     allow: []
   },
   {
-    path: "apps/server/services/s3_storage.ts",
+    path: "api/services/s3_storage.ts",
     allow: ["StorageFileStatus", "StorageError", "StorageErrorStatus", "storageGet"]
   },
   {
-    path: "apps/server/services/message.ts",
+    path: "api/services/message.ts",
     allow: [
       "SendEmailInput",
       "SendMerchantEventNoticeInput",
@@ -108,9 +108,9 @@ const COVERED_FILES = [
 
 /** Import sources inside ts exemplars → repo files that must export them. */
 const EXEMPLAR_IMPORT_MAP = {
-  "../_core/db": "apps/server/_core/db.ts",
-  "../db/schema": "apps/server/db/schema.ts",
-  "../services/todos": "apps/server/services/todos.ts",
+  "../_core/db": "api/_core/db.ts",
+  "../db/schema": "api/db/schema.ts",
+  "../services/todos": "api/services/todos.ts",
   "@repo/shared/http": "packages/shared/src/http.ts"
 };
 
@@ -170,11 +170,11 @@ const sqlBlocks = codeBlocks("sql");
 if (sqlBlocks.length === 0) {
   errors.push("AGENTS.md has no ```sql exemplar block");
 } else {
-  const migration = normalizeSql(read("apps/server/migrations/001_init.sql"));
+  const migration = normalizeSql(read("api/migrations/001_init.sql"));
   for (const block of sqlBlocks) {
     if (!migration.includes(normalizeSql(block))) {
       errors.push(
-        "AGENTS.md sql exemplar diverged from apps/server/migrations/001_init.sql"
+        "AGENTS.md sql exemplar diverged from api/migrations/001_init.sql"
       );
     }
   }

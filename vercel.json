@@ -1,5 +1,5 @@
 {
-  "buildCommand": "pnpm --dir apps/client build",
-  "outputDirectory": "apps/client/dist",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }

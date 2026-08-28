@@ -42,7 +42,9 @@ coverage/
 .nyc_output/
 
 # --- Build outputs / caches ---
-apps/client/dist/
+dist/
+!api/dist/
+!api/dist/**
 dist-ssr/
 build/
 electron-dist/
@@ -64,8 +66,6 @@ temp/
 .vite-inspect/
 .lov.tailwind.config.js
 src/tailwind.config.lov.json
-apps/client/.lov.tailwind.config.js
-apps/client/src/tailwind.config.lov.json
 
 # --- TypeScript ---
 *.tsbuildinfo
@@ -105,5 +105,6 @@ Thumbs.db
 uploaded_files/
 
 # !!! DO NOT DELETE OR ADJUST: required by FC deploy flow !!!
-!apps/server/dist/
+!api/dist/
+!api/dist/**
 # !!! END: changing this will break FC deployment !!!

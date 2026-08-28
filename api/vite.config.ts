@@ -2,10 +2,13 @@ import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
 
 const serverBuildTarget = process.env.SERVER_BUILD_TARGET === "web" ? "web" : "fc";
-const fromRoot = (path: string) => fileURLToPath(new URL(`../../${path}`, import.meta.url));
+const projectRoot = fileURLToPath(new URL("..", import.meta.url));
+const fromRoot = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url));
 
 export default defineConfig({
-  envDir: "../..",
+  root: projectRoot,
+  envDir: projectRoot,
+  publicDir: false,
   ssr: {
     noExternal: true
   },
@@ -17,8 +20,8 @@ export default defineConfig({
     ]
   },
   build: {
-    ssr: serverBuildTarget === "web" ? "_core/fc-entry.web.ts" : "_core/fc-entry.ts",
-    outDir: "dist",
+    ssr: serverBuildTarget === "web" ? "api/_core/fc-entry.web.ts" : "api/_core/fc-entry.ts",
+    outDir: "api/dist",
     emptyOutDir: true,
     target: "node20",
     rollupOptions: {

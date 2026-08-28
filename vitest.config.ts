@@ -3,16 +3,15 @@
 // root config. Each entry points at a workspace-local vitest.config.ts which
 // owns its own environment + include patterns.
 //
-// Run all:        `pnpm test`
-// Filter project: `pnpm vitest run --project=server`  /  `--project=client`
-// Filter path:    `pnpm vitest run apps/server/_test/infra`
+// Run all:        `npm test`
+// Filter project: `npx vitest run --project=server`
+// Filter path:    `npx vitest run api/_test/infra`
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     projects: [
-      "./apps/client/vitest.config.ts",
-      "./apps/server/vitest.config.ts"
+      "./api/vitest.config.ts"
     ]
   }
 });

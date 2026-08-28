@@ -1,5 +1,5 @@
 -- 001_init.sql — todos demo table (libsql / SQLite dialect)
--- Matches apps/server/db/schema.ts and apps/server/services/todos.ts.
+-- Matches api/db/schema.ts and api/services/todos.ts.
 CREATE TABLE IF NOT EXISTS todos (
   id        TEXT    PRIMARY KEY,
   userId    TEXT    NOT NULL,

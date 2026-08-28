@@ -22,9 +22,44 @@ function insensitiveEndsWith(recordVal, value) {
 	if (typeof recordVal !== "string" || typeof value !== "string") return false;
 	return recordVal.toLowerCase().endsWith(value.toLowerCase());
 }
+function indexById(rows) {
+	const byId = /* @__PURE__ */ new Map();
+	for (const row of rows) byId.set(row.id, row);
+	return byId;
+}
+function mergeTransactionInto(target, base, clone) {
+	const models = new Set([...Object.keys(base), ...Object.keys(clone)]);
+	for (const model of models) {
+		if (!(model in clone)) {
+			delete target[model];
+			continue;
+		}
+		const baseById = indexById(base[model] ?? []);
+		const cloneRows = clone[model] ?? [];
+		const cloneById = indexById(cloneRows);
+		const liveRows = target[model] ?? [];
+		const merged = [];
+		const placed = /* @__PURE__ */ new Set();
+		for (const liveRow of liveRows) {
+			const id = liveRow.id;
+			const baseRow = baseById.get(id);
+			const cloneRow = cloneById.get(id);
+			if (baseRow !== void 0 && cloneRow === void 0) continue;
+			if (cloneRow !== void 0 && rowChanged(baseRow, cloneRow)) merged.push(cloneRow);
+			else merged.push(liveRow);
+			placed.add(id);
+		}
+		for (const cloneRow of cloneRows) if (!baseById.has(cloneRow.id) && !placed.has(cloneRow.id)) merged.push(cloneRow);
+		target[model] = merged;
+	}
+}
+function rowChanged(baseRow, cloneRow) {
+	if (baseRow === void 0) return true;
+	return JSON.stringify(baseRow) !== JSON.stringify(cloneRow);
+}
 var memoryAdapter = (db, config) => {
 	let lazyOptions = null;
-	const adapterCreator = createAdapterFactory({
+	const buildAdapterFactory = (activeDb) => createAdapterFactory({
 		config: {
 			adapterId: "memory",
 			adapterName: "Memory Adapter",
@@ -32,19 +67,15 @@ var memoryAdapter = (db, config) => {
 			debugLogs: config?.debugLogs || false,
 			supportsArrays: true,
 			customTransformInput(props) {
-				if (props.options.advanced?.database?.generateId === "serial" && props.field === "id" && props.action === "create") return db[props.model].length + 1;
+				if (props.options.advanced?.database?.generateId === "serial" && props.field === "id" && props.action === "create") return activeDb[props.model].length + 1;
 				return props.data;
 			},
 			transaction: async (cb) => {
-				const clone = structuredClone(db);
-				try {
-					return await cb(adapterCreator(lazyOptions));
-				} catch (error) {
-					Object.keys(db).forEach((key) => {
-						db[key] = clone[key];
-					});
-					throw error;
-				}
+				const base = structuredClone(activeDb);
+				const clone = structuredClone(activeDb);
+				const result = await cb(buildAdapterFactory(clone)(lazyOptions));
+				mergeTransactionInto(activeDb, base, clone);
+				return result;
 			}
 		},
 		adapter: ({ getFieldName, getDefaultFieldName, options, getModelName }) => {
@@ -71,9 +102,9 @@ var memoryAdapter = (db, config) => {
 			};
 			function convertWhereClause(where, model, join, select) {
 				const baseRecords = (() => {
-					const table = db[model];
+					const table = activeDb[model];
 					if (!table) {
-						logger.error(`[MemoryAdapter] Model ${model} not found in the DB`, Object.keys(db));
+						logger.error(`[MemoryAdapter] Model ${model} not found in the DB`, Object.keys(activeDb));
 						throw new Error(`Model ${model} not found`);
 					}
 					const evalClause = (record, clause) => {
@@ -144,9 +175,9 @@ var memoryAdapter = (db, config) => {
 					const nestedEntry = grouped.get(baseId);
 					for (const [joinModel, joinAttr] of Object.entries(join)) {
 						const joinModelName = getModelName(joinModel);
-						const joinTable = db[joinModelName];
+						const joinTable = activeDb[joinModelName];
 						if (!joinTable) {
-							logger.error(`[MemoryAdapter] JoinOption model ${joinModelName} not found in the DB`, Object.keys(db));
+							logger.error(`[MemoryAdapter] JoinOption model ${joinModelName} not found in the DB`, Object.keys(activeDb));
 							throw new Error(`JoinOption model ${joinModelName} not found`);
 						}
 						const matchingRecords = joinTable.filter((joinRecord) => joinRecord[joinAttr.on.to] === baseRecord[joinAttr.on.from]);
@@ -170,9 +201,9 @@ var memoryAdapter = (db, config) => {
 			}
 			return {
 				create: async ({ model, data }) => {
-					if (options.advanced?.database?.generateId === "serial") data.id = db[getModelName(model)].length + 1;
-					if (!db[model]) db[model] = [];
-					db[model].push(data);
+					if (options.advanced?.database?.generateId === "serial") data.id = activeDb[getModelName(model)].length + 1;
+					if (!activeDb[model]) activeDb[model] = [];
+					activeDb[model].push(data);
 					return data;
 				},
 				findOne: async ({ model, where, select, join }) => {
@@ -202,9 +233,10 @@ var memoryAdapter = (db, config) => {
 				},
 				count: async ({ model, where }) => {
 					if (where) return convertWhereClause(where, model).length;
-					return db[model].length;
+					return activeDb[model].length;
 				},
 				update: async ({ model, where, update }) => {
+					if (where.length === 0) return null;
 					const res = convertWhereClause(where, model);
 					res.forEach((record) => {
 						Object.assign(record, update);
@@ -212,15 +244,16 @@ var memoryAdapter = (db, config) => {
 					return res[0] || null;
 				},
 				delete: async ({ model, where }) => {
-					const table = db[model];
+					if (where.length === 0) return;
+					const table = activeDb[model];
 					const res = convertWhereClause(where, model);
-					db[model] = table.filter((record) => !res.includes(record));
+					activeDb[model] = table.filter((record) => !res.includes(record));
 				},
 				deleteMany: async ({ model, where }) => {
-					const table = db[model];
+					const table = activeDb[model];
 					const res = convertWhereClause(where, model);
 					let count = 0;
-					db[model] = table.filter((record) => {
+					activeDb[model] = table.filter((record) => {
 						if (res.includes(record)) {
 							count++;
 							return false;
@@ -230,22 +263,30 @@ var memoryAdapter = (db, config) => {
 					return count;
 				},
 				consumeOne: async ({ model, where }) => {
-					const table = db[model];
+					const table = activeDb[model];
 					const target = convertWhereClause(where, model)[0];
 					if (!target) return null;
-					db[model] = table.filter((record) => record !== target);
+					activeDb[model] = table.filter((record) => record !== target);
 					return target;
 				},
-				updateMany({ model, where, update }) {
+				incrementOne: async ({ model, where, increment, set }) => {
+					const target = convertWhereClause(where, model)[0];
+					if (!target) return null;
+					for (const [field, delta] of Object.entries(increment)) target[field] = (typeof target[field] === "number" ? target[field] : 0) + delta;
+					if (set) Object.assign(target, set);
+					return target;
+				},
+				updateMany: async ({ model, where, update }) => {
 					const res = convertWhereClause(where, model);
 					res.forEach((record) => {
 						Object.assign(record, update);
 					});
-					return res[0] || null;
+					return res.length;
 				}
 			};
 		}
 	});
+	const adapterCreator = buildAdapterFactory(db);
 	return (options) => {
 		lazyOptions = options;
 		return adapterCreator(options);

@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { Picker } from "./components/Picker";
 
 export type Language = "en" | "hr";
 
@@ -367,10 +368,13 @@ export function useLanguage() {
 
 export function LanguagePicker() {
   const { language, setLanguage, t } = useLanguage();
-  return <label className="language-picker">
-    <select value={language} onChange={(event) => setLanguage(event.target.value as Language)} aria-label={t("Language")}>
-      <option value="en">🇬🇧</option>
-      <option value="hr">🇭🇷</option>
-    </select>
-  </label>;
+  const options = [{ value: "en", label: "🇬🇧" }, { value: "hr", label: "🇭🇷" }];
+  return <Picker
+    className="language-picker"
+    options={options}
+    value={language}
+    ariaLabel={t("Language")}
+    onChange={(value) => setLanguage(value as Language)}
+    renderValue={(option) => option?.label}
+  />;
 }

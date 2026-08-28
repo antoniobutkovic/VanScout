@@ -8,7 +8,7 @@ import type { Hono } from "hono";
 /**
  * Auto-discovery route registry.
  *
- * Every `apps/server/routes/<name>.route.ts` is discovered at build time and
+ * Every `api/routes/<name>.route.ts` is discovered at build time and
  * mounted at `/api/<name>` (see `create-app.ts`). Nothing here, in
  * `create-app.ts`, or in `with-session.ts` needs editing to add a route — drop
  * a new `*.route.ts` file into `routes/` and it is wired automatically. This is

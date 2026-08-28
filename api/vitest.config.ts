@@ -27,15 +27,15 @@ export default defineConfig({
     alias: [
       {
         find: /^@repo\/shared\/http$/,
-        replacement: path.resolve(__dirname, "../../packages/shared/src/http.ts")
+        replacement: path.resolve(__dirname, "../packages/shared/src/http.ts")
       },
       {
         find: /^@repo\/shared\/crm-activity$/,
-        replacement: path.resolve(__dirname, "../../packages/shared/src/crm-activity.ts")
+        replacement: path.resolve(__dirname, "../packages/shared/src/crm-activity.ts")
       },
       {
         find: /^@repo\/shared$/,
-        replacement: path.resolve(__dirname, "../../packages/shared/src/index.ts")
+        replacement: path.resolve(__dirname, "../packages/shared/src/index.ts")
       }
     ]
   }

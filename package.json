@@ -2,9 +2,43 @@
   "name": "movago",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "pnpm --dir apps/client dev",
-    "build": "pnpm --dir apps/client build",
-    "preview": "pnpm --dir apps/client preview"
+    "dev": "vite --host 0.0.0.0 --port 3100",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "dev:api": "tsx api/_core/dev-server.ts",
+    "build:api": "vite build --config api/vite.config.ts",
+    "start": "node api/dist/index.js",
+    "test": "vitest run",
+    "lint": "eslint --config api/eslint.config.js api"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.8",
+    "@hono/zod-openapi": "^1.4.0",
+    "@libsql/client": "^0.17.3",
+    "@repo/shared": "file:packages/shared",
+    "better-auth": "^1.6.14",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.6.12",
+    "hono-alibaba-cloud-fc3-adapter": "^1.0.2",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^6.30.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.5.5",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "eslint": "^9.39.0",
+    "globals": "^16.5.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.49.0",
+    "vite": "npm:rolldown-vite@^7.3.1",
+    "vitest": "^4.1.8"
   }
 }

@@ -5,7 +5,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package.json ./package.json
-COPY apps/server/dist ./apps/server/dist
+COPY package-lock.json ./package-lock.json
+COPY packages/shared ./packages/shared
+RUN npm ci --omit=dev
+COPY api/dist ./api/dist
 
 EXPOSE 9901
 CMD ["npm", "start"]

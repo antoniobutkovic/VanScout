@@ -37,7 +37,7 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => {
 });
 app.use("/api/*", withSession);
 
-// Routes are auto-discovered from apps/server/routes/*.route.ts and mounted at
+// Routes are auto-discovered from api/routes/*.route.ts and mounted at
 // /api/<name>. To add an endpoint, add a route file — no edits needed here.
 for (const { path, router } of routeEntries) {
   app.route(path, router);
