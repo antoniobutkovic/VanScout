@@ -38,6 +38,11 @@ p { line-height: 1.5; color: var(--muted); }
 .topbar nav a { color: #4c514a; }
 .topbar nav a:hover, .topbar nav a.active { color: var(--ink); }
 .nav-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
+.language-picker { display: inline-flex; align-items: center; gap: 7px; margin: 0; font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.language-picker select { width: auto; min-width: 58px; border: 1px solid var(--stone); background: var(--white); padding: 7px 24px 7px 8px; font-size: 11px; font-weight: 700; color: var(--ink); }
+.wizard-header-actions, .standalone-header-actions { display: flex; align-items: center; gap: 18px; }
+.wizard-header-actions > span { color: var(--muted); font-size: 13px; }
+.wizard-header-actions > a { font-size: 25px; font-weight: 300; }
 .brand { font-size: 25px; letter-spacing: -0.075em; font-weight: 800; width: fit-content; }
 .brand span { color: var(--clay); }
 .sign-in, .quiet-link, .offer-actions button, .back, .expand, .setting-list button, .active-meta button, .vehicles .manager button { background: none; border: 0; color: var(--ink); font-weight: 650; padding: 0; text-align: left; }
@@ -427,6 +432,8 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
   .topbar { padding: 0 18px; grid-template-columns: 1fr auto; }
   .topbar nav { display: none; }
   .nav-actions { gap: 11px; }
+  .language-picker > span { display: none; }
+  .language-picker select { min-width: 49px; padding-right: 18px; }
   .nav-actions .sign-in { display: none; }
   .nav-actions .button.short { min-height: 38px; padding: 0 13px; }
   .home-hero { padding: 45px 18px 72px; min-height: 0; }
