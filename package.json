@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0 --port 3100",
     "dev:staging": "node scripts/run-with-env.mjs .env.staging next dev --hostname 0.0.0.0 --port 3100",
