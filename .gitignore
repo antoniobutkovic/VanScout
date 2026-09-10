@@ -43,8 +43,6 @@ coverage/
 
 # --- Build outputs / caches ---
 dist/
-!api/dist/
-!api/dist/**
 dist-ssr/
 build/
 electron-dist/

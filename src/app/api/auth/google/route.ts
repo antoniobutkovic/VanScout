@@ -1,0 +1,24 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { upsertGoogleUser, type AccountRole } from "@/lib/database";
+import { createSessionToken } from "@/lib/session";
+import { verifyGoogleIdToken } from "@/lib/google";
+
+const bodySchema = z.object({
+  idToken: z.string().min(1),
+  role: z.enum(["requester", "transporter"]).default("requester"),
+});
+
+export async function POST(request: Request) {
+  try {
+    const body = bodySchema.parse(await request.json());
+    const identity = await verifyGoogleIdToken(body.idToken);
+    const user = await upsertGoogleUser(identity, body.role as AccountRole);
+    const token = await createSessionToken(user);
+    return NextResponse.json({ token, user });
+  } catch (error) {
+    const message = error instanceof z.ZodError ? "Invalid Google sign-in request" : error instanceof Error ? error.message : "Google sign-in failed";
+    const status = message.includes("not configured") ? 503 : 401;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
