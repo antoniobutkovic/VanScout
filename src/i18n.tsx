@@ -167,6 +167,7 @@ const CROATIAN: Record<string, string> = {
   "Google sign-in popup was blocked": "Google popup je blokiran. Dopustite popup prozore i pokušajte ponovno.",
   "Unable to sign in": "Nije se moguće prijaviti.",
   "Unable to create account": "Nije moguće izraditi račun.",
+  "Password must be at least 8 characters": "Lozinka mora imati najmanje 8 znakova.",
   "Unable to send the verification email": "Nije moguće poslati e-poštu za potvrdu.",
   "Unable to send verification email": "Nije moguće poslati e-poštu za potvrdu.",
   "Verification email sent": "E-pošta za potvrdu je ponovno poslana.",
