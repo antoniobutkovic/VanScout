@@ -234,8 +234,6 @@ textarea { min-height: 105px; resize: vertical; }
 .google:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(53,74,46,.1); }
 .google:disabled { cursor: wait; opacity: .68; }
 .google > span { display: inline-flex; align-items: center; gap: 9px; }
-.google-spinner { width: 14px; height: 14px; border: 2px solid rgba(36,42,35,.2); border-top-color: var(--moss); border-radius: 50%; animation: google-spin .7s linear infinite; }
-@keyframes google-spin { to { transform: rotate(360deg); } }
 .or { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; margin: 19px 0; color: var(--muted); font-size: 12px; }
 .or::before, .or::after { content:""; height: 1px; background: var(--stone); }
 .otp { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 23px 0; }

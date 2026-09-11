@@ -101,7 +101,7 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
     }
   };
 
-  return <div className="google-sign-in"><button type="button" className="google" disabled={isSigningIn} aria-busy={isSigningIn} onClick={handleGoogleClick}>G <span>{isSigningIn && <i className="google-spinner" aria-hidden="true" />}{isSigningIn ? t("Signing in...") : t("Continue with Google")}</span></button>{error && <p className="google-auth-error">{error}</p>}</div>;
+  return <div className="google-sign-in"><button type="button" className="google" disabled={isSigningIn} aria-busy={isSigningIn} onClick={handleGoogleClick}>G <span>{t("Continue with Google")}</span></button>{error && <p className="google-auth-error">{error}</p>}</div>;
 }
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
