@@ -403,14 +403,20 @@ type I18nContextValue = {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<Language>(() => {
-    const stored = window.localStorage.getItem("vanscout-language");
-    if (stored === "hr" || stored === "en") return stored;
-    const browserLanguage = window.navigator.languages?.[0] ?? window.navigator.language;
-    return browserLanguage.toLowerCase().startsWith("hr") ? "hr" : "en";
-  });
+  const [language, setLanguage] = useState<Language>("en");
 
   useEffect(() => {
+    const stored = window.localStorage.getItem("vanscout-language");
+    if (stored === "hr" || stored === "en") {
+      setLanguage(stored);
+      return;
+    }
+    const browserLanguage = window.navigator.languages?.[0] ?? window.navigator.language;
+    setLanguage(browserLanguage.toLowerCase().startsWith("hr") ? "hr" : "en");
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     window.localStorage.setItem("vanscout-language", language);
     document.documentElement.lang = language;
     document.title = "VanScout";

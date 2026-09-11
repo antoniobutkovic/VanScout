@@ -36,7 +36,7 @@ export function Picker({
   const selected = options.find((option) => option.value === selectedValue) ?? options[0];
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || typeof document === "undefined") return undefined;
     const closeOnOutsideClick = (event: MouseEvent) => {
       if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
     };
