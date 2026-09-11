@@ -24,6 +24,7 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const [error, setError] = useState("");
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +58,7 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
           client_id: config.google.clientId,
           callback: async response => {
             setError("");
+            setIsSigningIn(true);
             try {
               const authResponse = await fetch("/api/auth/google", {
                 method: "POST",
@@ -68,6 +70,7 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
               window.localStorage.setItem("auth_token", payload.token);
               navigate(role === "transporter" ? "/carrier" : "/customer");
             } catch (authError) {
+              setIsSigningIn(false);
               setError(authError instanceof Error ? authError.message : t("Google sign-in failed"));
             }
           },
@@ -80,7 +83,25 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
     return () => { cancelled = true; };
   }, [navigate, role, t]);
 
-  return <div className="google-sign-in"><button type="button" className="google" onClick={() => window.google?.accounts.id.prompt()}>G <span>{t("Continue with Google")}</span></button>{error && <p className="google-auth-error">{error}</p>}</div>;
+  const handleGoogleClick = () => {
+    setError("");
+    setIsSigningIn(true);
+    try {
+      if (!window.google) {
+        setIsSigningIn(false);
+        return;
+      }
+      window.google.accounts.id.prompt(notification => {
+        if (notification.isNotDisplayed() || notification.isSkippedMoment() || notification.isDismissedMoment()) {
+          setIsSigningIn(false);
+        }
+      });
+    } catch {
+      setIsSigningIn(false);
+    }
+  };
+
+  return <div className="google-sign-in"><button type="button" className="google" disabled={isSigningIn} aria-busy={isSigningIn} onClick={handleGoogleClick}>G <span>{isSigningIn && <i className="google-spinner" aria-hidden="true" />}{isSigningIn ? t("Signing in...") : t("Continue with Google")}</span></button>{error && <p className="google-auth-error">{error}</p>}</div>;
 }
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
