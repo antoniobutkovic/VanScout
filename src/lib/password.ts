@@ -23,3 +23,6 @@ export function createResetToken() {
   return randomBytes(32).toString("hex");
 }
 
+export function createVerificationToken() {
+  return randomBytes(32).toString("hex");
+}

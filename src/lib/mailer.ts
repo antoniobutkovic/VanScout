@@ -1,11 +1,11 @@
 import nodemailer from "nodemailer";
 import { requiredEnv } from "./config";
 
-export async function sendPasswordResetEmail({ to, resetUrl }: { to: string; resetUrl: string }) {
+function createTransporter() {
   const port = Number(requiredEnv("SMTP_PORT"));
   if (!Number.isInteger(port)) throw new Error("SMTP_PORT must be a number");
 
-  const transporter = nodemailer.createTransport({
+  return nodemailer.createTransport({
     host: requiredEnv("SMTP_HOST"),
     port,
     secure: requiredEnv("SMTP_SECURE").toLowerCase() === "true",
@@ -14,8 +14,10 @@ export async function sendPasswordResetEmail({ to, resetUrl }: { to: string; res
       pass: requiredEnv("SMTP_PASSWORD"),
     },
   });
+}
 
-  await transporter.sendMail({
+export async function sendPasswordResetEmail({ to, resetUrl }: { to: string; resetUrl: string }) {
+  await createTransporter().sendMail({
     from: requiredEnv("MAIL_FROM"),
     to,
     subject: "Reset your VanScout password",
@@ -24,3 +26,12 @@ export async function sendPasswordResetEmail({ to, resetUrl }: { to: string; res
   });
 }
 
+export async function sendEmailVerificationEmail({ to, verificationUrl }: { to: string; verificationUrl: string }) {
+  await createTransporter().sendMail({
+    from: requiredEnv("MAIL_FROM"),
+    to,
+    subject: "Confirm your VanScout email",
+    text: `Confirm your VanScout email using this link:\n\n${verificationUrl}\n\nThis link expires in 24 hours. If you did not create a VanScout account, you can ignore this email.`,
+    html: `<p>Confirm your VanScout email using the link below:</p><p><a href="${verificationUrl}">Confirm email</a></p><p>This link expires in 24 hours. If you did not create a VanScout account, you can ignore this email.</p>`,
+  });
+}

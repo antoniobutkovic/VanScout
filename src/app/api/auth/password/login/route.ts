@@ -16,6 +16,9 @@ export async function POST(request: Request) {
     if (!account?.passwordHash || !(await verifyPassword(body.password, account.passwordHash))) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
+    if (!account.emailVerified) {
+      return NextResponse.json({ code: "EMAIL_NOT_VERIFIED", error: "Please verify your email before signing in" }, { status: 403 });
+    }
 
     const token = await createSessionToken(account.user);
     return NextResponse.json({ token, user: account.user });
@@ -24,4 +27,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unable to sign in" }, { status: 500 });
   }
 }
-

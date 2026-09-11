@@ -34,6 +34,7 @@ async function ensureSchema() {
         name TEXT NOT NULL,
         avatar_url TEXT,
         password_hash TEXT,
+        email_verified_at TIMESTAMPTZ,
         role TEXT NOT NULL DEFAULT 'requester' CHECK (role IN ('requester', 'transporter')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -41,6 +42,16 @@ async function ensureSchema() {
     `.then(async () => {
       await sql`ALTER TABLE vanscout_users ALTER COLUMN google_subject DROP NOT NULL`;
       await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS password_hash TEXT`;
+      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`;
+      await sql`UPDATE vanscout_users SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE google_subject IS NOT NULL`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_email_verifications (
+          token_hash TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_password_resets (
           token_hash TEXT PRIMARY KEY,
@@ -85,12 +96,13 @@ export async function upsertGoogleUser(identity: GoogleIdentity, role: AccountRo
   await ensureSchema();
   const sql = database();
   const rows = await sql`
-    INSERT INTO vanscout_users (id, google_subject, email, name, avatar_url, role)
-    VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${identity.name}, ${identity.avatarUrl}, ${role})
+    INSERT INTO vanscout_users (id, google_subject, email, name, avatar_url, email_verified_at, role)
+    VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${identity.name}, ${identity.avatarUrl}, NOW(), ${role})
     ON CONFLICT (google_subject) DO UPDATE SET
       email = EXCLUDED.email,
       name = EXCLUDED.name,
       avatar_url = EXCLUDED.avatar_url,
+      email_verified_at = NOW(),
       role = EXCLUDED.role,
       updated_at = NOW()
     RETURNING id, email, name, avatar_url, role
@@ -105,6 +117,7 @@ export async function findUserById(id: string): Promise<AppUser | null> {
     SELECT id, email, name, avatar_url, role
     FROM vanscout_users
     WHERE id = ${id}
+      AND email_verified_at IS NOT NULL
     LIMIT 1
   `;
   return rows[0] ? toUser(rows[0] as Record<string, unknown>) : null;
@@ -114,7 +127,7 @@ export async function findUserByEmailWithPassword(email: string) {
   await ensureSchema();
   const sql = database();
   const rows = await sql`
-    SELECT id, email, name, avatar_url, role, password_hash
+    SELECT id, email, name, avatar_url, role, password_hash, email_verified_at
     FROM vanscout_users
     WHERE LOWER(email) = LOWER(${email.trim()})
     LIMIT 1
@@ -123,6 +136,7 @@ export async function findUserByEmailWithPassword(email: string) {
   return {
     user: toUser(rows[0] as Record<string, unknown>),
     passwordHash: typeof rows[0].password_hash === "string" ? rows[0].password_hash : null,
+    emailVerified: rows[0].email_verified_at instanceof Date || typeof rows[0].email_verified_at === "string",
   };
 }
 
@@ -137,6 +151,34 @@ export async function createPasswordUser(email: string, passwordHash: string, ro
     RETURNING id, email, name, avatar_url, role
   `;
   return rows[0] ? toUser(rows[0] as Record<string, unknown>) : null;
+}
+
+export async function createEmailVerification(userId: string, tokenHash: string) {
+  await ensureSchema();
+  const sql = database();
+  await sql`DELETE FROM vanscout_email_verifications WHERE user_id = ${userId}`;
+  await sql`
+    INSERT INTO vanscout_email_verifications (token_hash, user_id, expires_at)
+    VALUES (${tokenHash}, ${userId}, NOW() + INTERVAL '24 hours')
+  `;
+}
+
+export async function verifyEmail(tokenHash: string) {
+  await ensureSchema();
+  const sql = database();
+  const rows = await sql`
+    WITH consumed AS (
+      DELETE FROM vanscout_email_verifications
+      WHERE token_hash = ${tokenHash}
+        AND expires_at > NOW()
+      RETURNING user_id
+    )
+    UPDATE vanscout_users
+    SET email_verified_at = NOW(), updated_at = NOW()
+    WHERE id IN (SELECT user_id FROM consumed)
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function createPasswordReset(email: string, tokenHash: string) {

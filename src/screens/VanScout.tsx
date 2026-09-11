@@ -146,7 +146,9 @@ export function Registration() {
   const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [authError, setAuthError] = useState("");
+  const [needsEmailVerification, setNeedsEmailVerification] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const isRegistering = searchParams.get("mode") === "register";
 
@@ -154,14 +156,26 @@ export function Registration() {
     event.preventDefault();
     setSubmitting(true);
     setAuthError("");
+    setNeedsEmailVerification(false);
     try {
       const response = await fetch(isRegistering ? "/api/auth/password/register" : "/api/auth/password/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, role }),
+        body: JSON.stringify({ email, password, passwordConfirmation, role }),
       });
-      const payload = await response.json() as { token?: string; error?: string };
-      if (!response.ok || !payload.token) throw new Error(payload.error || t(isRegistering ? "Unable to create account" : "Unable to sign in"));
+      const payload = await response.json() as { token?: string; email?: string; error?: string; code?: string };
+      if (!response.ok) {
+        if (payload.code === "EMAIL_NOT_VERIFIED") {
+          setNeedsEmailVerification(true);
+          throw new Error(t("Please verify your email before signing in"));
+        }
+        throw new Error(payload.error || t(isRegistering ? "Unable to create account" : "Unable to sign in"));
+      }
+      if (isRegistering) {
+        nav(`/auth/check-email?email=${encodeURIComponent(payload.email || email)}`);
+        return;
+      }
+      if (!payload.token) throw new Error(t("Unable to sign in"));
       window.localStorage.setItem("auth_token", payload.token);
       nav(role === "transporter" ? "/carrier" : "/customer");
     } catch (error) {
@@ -171,7 +185,62 @@ export function Registration() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!phone ? <><RolePicker value={role} onChange={setRole} /><GoogleSignInButton role={role} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Create a password")} autoComplete={isRegistering ? "new-password" : "current-password"} minLength={isRegistering ? 8 : undefined} required /></label>{!isRegistering && <Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link>}</div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t(isRegistering ? "Register" : "Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t(isRegistering ? "Already have an account?" : "Don't have an account?")} <Link to={isRegistering ? "/auth" : "/auth?mode=register"}>{t(isRegistering ? "Sign in here" : "Create one here")}</Link></p></> : <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><p>{t("We’ll text a six-digit code to keep VanScout trusted for everyone.")}</p><label>{t("Phone number")}<input defaultValue="+385 91 555 2400" /></label><div className="otp">{[1,2,3,4,5,6].map(n => <input aria-label={`${t("Digit")} ${n}`} key={n} maxLength={1} />)}</div><button className="button dark full" onClick={() => nav(role === "transporter" ? "/carrier" : "/customer")}>{t(role === "transporter" ? "Continue to dashboard" : "Verify and publish")} <Arrow /></button><button className="quiet-link center">{t("Send a new code")}</button></>}</main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!phone ? <><RolePicker value={role} onChange={setRole} /><GoogleSignInButton role={role} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Create a password")} autoComplete={isRegistering ? "new-password" : "current-password"} minLength={isRegistering ? 8 : undefined} required /></label>{isRegistering && <label className="password-confirmation"><span>{t("Confirm password")}</span><input type="password" value={passwordConfirmation} onChange={event => setPasswordConfirmation(event.target.value)} autoComplete="new-password" minLength={8} required /></label>}{!isRegistering && <Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link>}</div>{authError && <p className="auth-error">{authError}</p>}{needsEmailVerification && <Link className="auth-verification-link" to={`/auth/check-email?email=${encodeURIComponent(email)}`}>{t("Resend verification email")}</Link>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t(isRegistering ? "Register" : "Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t(isRegistering ? "Already have an account?" : "Don't have an account?")} <Link to={isRegistering ? "/auth" : "/auth?mode=register"}>{t(isRegistering ? "Sign in here" : "Create one here")}</Link></p></> : <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><p>{t("We’ll text a six-digit code to keep VanScout trusted for everyone.")}</p><label>{t("Phone number")}<input defaultValue="+385 91 555 2400" /></label><div className="otp">{[1,2,3,4,5,6].map(n => <input aria-label={`${t("Digit")} ${n}`} key={n} maxLength={1} />)}</div><button className="button dark full" onClick={() => nav(role === "transporter" ? "/carrier" : "/customer")}>{t(role === "transporter" ? "Continue to dashboard" : "Verify and publish")} <Arrow /></button><button className="quiet-link center">{t("Send a new code")}</button></>}</main></div>;
+}
+
+export function CheckEmail() {
+  const { t } = useLanguage();
+  const [searchParams] = useSearchParams();
+  const [email, setEmail] = useState(searchParams.get("email") || "");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const resend = async () => {
+    setSubmitting(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/auth/email/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const payload = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to send verification email"));
+      setMessage(payload.message || t("Verification email sent"));
+    } catch (resendError) {
+      setError(resendError instanceof Error ? resendError.message : t("Unable to send verification email"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Confirm your email")}</p><h1>{t("Check your email")}</h1><p>{t("We sent a verification link to")} <strong>{email}</strong>.</p><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button className="quiet-link center" type="button" onClick={() => void resend()} disabled={submitting}>{t("Resend verification email")}</button><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+}
+
+export function VerifyEmail() {
+  const { t } = useLanguage();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token") || "";
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
+
+  useEffect(() => {
+    if (!token) {
+      setStatus("error");
+      return;
+    }
+    void fetch("/api/auth/email/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }).then(response => {
+      setStatus(response.ok ? "success" : "error");
+      window.history.replaceState({}, "", "/auth/verify-email");
+    }).catch(() => setStatus("error"));
+  }, [token]);
+
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Confirm your email")}</p><h1>{status === "loading" ? t("Confirming your email…") : status === "success" ? t("Email verified") : t("Unable to verify your email")}</h1><p>{status === "success" ? t("Your email has been verified. You can now sign in.") : status === "error" ? t("This verification link is invalid or expired") : t("Please wait while we confirm your email.")}</p><Link className="button dark full auth-create-button" to="/auth">{t("Back to sign in")}</Link></main></div>;
 }
 
 export function ForgotPassword() {

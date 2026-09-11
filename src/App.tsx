@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import {
   CarrierWorkspace,
+  CheckEmail,
   CreateRequest,
   CustomerWorkspace,
   Home,
@@ -9,6 +10,7 @@ import {
   Registration,
   ResetPassword,
   Tracking,
+  VerifyEmail,
 } from "./screens/VanScout";
 
 const App = () => (
@@ -17,6 +19,8 @@ const App = () => (
       <Route path="/" element={<Home />} />
       <Route path="/create-request" element={<CreateRequest />} />
       <Route path="/auth" element={<Registration />} />
+      <Route path="/auth/check-email" element={<CheckEmail />} />
+      <Route path="/auth/verify-email" element={<VerifyEmail />} />
       <Route path="/auth/forgot-password" element={<ForgotPassword />} />
       <Route path="/auth/reset-password" element={<ResetPassword />} />
       <Route path="/customer/*" element={<CustomerWorkspace />} />

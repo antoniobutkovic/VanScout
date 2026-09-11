@@ -232,6 +232,10 @@ textarea { min-height: 105px; resize: vertical; }
 .auth-signup-prompt { margin: 20px 0 0; text-align: center; font-size: 12px; }
 .auth-signup-prompt a { color: var(--moss); font-weight: 700; }
 .auth-signup-prompt a:hover { color: var(--clay); }
+.password-confirmation { margin-top: 20px; }
+.password-confirmation span { display: block; }
+.auth-verification-link { display: block; margin-top: 14px; color: var(--moss); font-size: 12px; font-weight: 700; }
+.auth-verification-link:hover { color: var(--clay); }
 .auth-error, .auth-message { margin: 14px 0 0; font-size: 12px; line-height: 1.45; }
 .auth-error, .auth-message.error { color: var(--red); }
 .auth-message.success { color: var(--moss); }
