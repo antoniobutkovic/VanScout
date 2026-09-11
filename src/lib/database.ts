@@ -126,6 +126,19 @@ export async function findUserByEmailWithPassword(email: string) {
   };
 }
 
+export async function createPasswordUser(email: string, passwordHash: string, role: AccountRole) {
+  await ensureSchema();
+  const sql = database();
+  const normalizedEmail = email.trim().toLowerCase();
+  const rows = await sql`
+    INSERT INTO vanscout_users (id, email, name, password_hash, role)
+    VALUES (${randomUUID()}, ${normalizedEmail}, ${normalizedEmail.split("@")[0]}, ${passwordHash}, ${role})
+    ON CONFLICT (email) DO NOTHING
+    RETURNING id, email, name, avatar_url, role
+  `;
+  return rows[0] ? toUser(rows[0] as Record<string, unknown>) : null;
+}
+
 export async function createPasswordReset(email: string, tokenHash: string) {
   await ensureSchema();
   const sql = database();

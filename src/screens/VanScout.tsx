@@ -148,29 +148,30 @@ export function Registration() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const isRegistering = searchParams.get("mode") === "register";
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
     setAuthError("");
     try {
-      const response = await fetch("/api/auth/password/login", {
+      const response = await fetch(isRegistering ? "/api/auth/password/register" : "/api/auth/password/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, role }),
       });
       const payload = await response.json() as { token?: string; error?: string };
-      if (!response.ok || !payload.token) throw new Error(payload.error || t("Unable to sign in"));
+      if (!response.ok || !payload.token) throw new Error(payload.error || t(isRegistering ? "Unable to create account" : "Unable to sign in"));
       window.localStorage.setItem("auth_token", payload.token);
       nav(role === "transporter" ? "/carrier" : "/customer");
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : t("Unable to sign in"));
+      setAuthError(error instanceof Error ? error.message : t(isRegistering ? "Unable to create account" : "Unable to sign in"));
     } finally {
       setSubmitting(false);
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!phone ? <><RolePicker value={role} onChange={setRole} /><GoogleSignInButton role={role} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Create a password")} autoComplete="current-password" required /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Create account")} <Arrow /></button></form></> : <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><p>{t("We’ll text a six-digit code to keep VanScout trusted for everyone.")}</p><label>{t("Phone number")}<input defaultValue="+385 91 555 2400" /></label><div className="otp">{[1,2,3,4,5,6].map(n => <input aria-label={`${t("Digit")} ${n}`} key={n} maxLength={1} />)}</div><button className="button dark full" onClick={() => nav(role === "transporter" ? "/carrier" : "/customer")}>{t(role === "transporter" ? "Continue to dashboard" : "Verify and publish")} <Arrow /></button><button className="quiet-link center">{t("Send a new code")}</button></>}</main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!phone ? <><RolePicker value={role} onChange={setRole} /><GoogleSignInButton role={role} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Create a password")} autoComplete={isRegistering ? "new-password" : "current-password"} minLength={isRegistering ? 8 : undefined} required /></label>{!isRegistering && <Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link>}</div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t(isRegistering ? "Register" : "Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t(isRegistering ? "Already have an account?" : "Don't have an account?")} <Link to={isRegistering ? "/auth" : "/auth?mode=register"}>{t(isRegistering ? "Sign in here" : "Create one here")}</Link></p></> : <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><p>{t("We’ll text a six-digit code to keep VanScout trusted for everyone.")}</p><label>{t("Phone number")}<input defaultValue="+385 91 555 2400" /></label><div className="otp">{[1,2,3,4,5,6].map(n => <input aria-label={`${t("Digit")} ${n}`} key={n} maxLength={1} />)}</div><button className="button dark full" onClick={() => nav(role === "transporter" ? "/carrier" : "/customer")}>{t(role === "transporter" ? "Continue to dashboard" : "Verify and publish")} <Arrow /></button><button className="quiet-link center">{t("Send a new code")}</button></>}</main></div>;
 }
 
 export function ForgotPassword() {
