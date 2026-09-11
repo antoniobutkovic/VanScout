@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { IMAGES } from "../assets/images";
 import { LanguagePicker, useLanguage } from "../i18n";
@@ -138,7 +138,107 @@ export function Home() {
 export function CreateRequest() { const { t } = useLanguage(); const nav = useNavigate(); const [step, setStep] = useState(0); const [category, setCategory] = useState("Furniture"); const [timing, setTiming] = useState("I’m flexible"); const [expanded, setExpanded] = useState(""); const next = () => step === 6 ? nav("/auth") : setStep(step + 1); return <div className="wizard"><header><Mark /><div className="wizard-header-actions"><span>{step + 1} / 7</span><LanguagePicker /><Link to="/">×</Link></div></header><div className="wizard-progress"><b style={{ width: `${(step + 1) * 14.285}%` }} />{WIZARD_STEPS.map((label, index) => <span className={index === step ? "current" : ""} key={label}>{t(label)}</span>)}</div><main>{step === 0 && <section><p className="eyebrow">{t("Start with the thing")}</p><h1>{t("What are you moving?")}</h1><div className="choices">{CATEGORIES.map(item => <button className={category === item ? "selected" : ""} key={item} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><label>{t("Item name")}<input defaultValue={t("Bed slats")} /></label><label>{t("Description")} <em>{t("Optional")}</em><textarea placeholder={t("Anything carriers should know about the item?")} /></label><button className="expand" onClick={() => setExpanded(expanded === "size" ? "" : "size")}>{expanded === "size" ? t("− Hide dimensions") : t("+ Add dimensions")}</button>{expanded === "size" && <div className="inline-inputs"><label>{t("Length")}<input placeholder="cm" /></label><label>{t("Width")}<input placeholder="cm" /></label><label>{t("Weight")}<input placeholder="kg" /></label></div>}</section>}{step === 1 && <section className="visual-step"><p className="eyebrow">{t("A better offer starts here")}</p><h1>{t("Show carriers what they’re moving.")}</h1><div className="drop"><b>＋</b><strong>{t("Drop photos here")}</strong><span>{t("or choose from your device")}</span><button className="button dark short">{t("Choose photos")}</button></div><p className="help">{t("Photos help carriers give you a more accurate price.")}</p></section>}{step === 2 && <AddressStep label={t("Where should it be picked up?")} value="IKEA Zagreb" kind="pickup" expanded={expanded === "pickup"} onExpand={() => setExpanded(expanded === "pickup" ? "" : "pickup")} />}{step === 3 && <AddressStep label={t("Where is it going?")} value="Trešnjevka, Zagreb" kind="delivery" expanded={expanded === "delivery"} onExpand={() => setExpanded(expanded === "delivery" ? "" : "delivery")} />}{step === 4 && <section><p className="eyebrow">{t("Make it work for you")}</p><h1>{t("When should it be moved?")}</h1><div className="timing">{["As soon as possible", "Choose a date", "I’m flexible"].map(item => <button className={timing === item ? "selected" : ""} key={item} onClick={() => setTiming(item)}><b>{t(item)}</b>{item === "I’m flexible" && <span>{t("Flexible jobs can often receive cheaper offers because carriers can combine them with existing routes.")}</span>}</button>)}</div>{timing === "Choose a date" && <label>{t("Preferred date")}<input type="date" /></label>}</section>}{step === 5 && <section><p className="eyebrow">{t("Last details")}</p><h1>{t("Anything else carriers should know?")}</h1><div className="tags">{["Needs two people", "Heavy item", "Already packed", "Store pickup", "Fragile"].map(tag => <button key={tag}>{t(tag)}</button>)}</div><label><textarea className="large-textarea" placeholder={t("Add a note (optional)")} /></label></section>}{step === 6 && <section className="review-request"><p className="eyebrow">{t("One more look")}</p><h1>{t("Ready to publish?")}</h1><article><ItemImage /><div><span>{t("Furniture")}</span><h2>{t("Bed slats")}</h2><p>IKEA Zagreb <i>→</i> Trešnjevka</p><small>12 km · {t(timing)} · {t("No loading help required")}</small></div><button>{t("Edit")}</button></article></section>}</main><footer><button className="button ghost" disabled={step === 0} onClick={() => setStep(Math.max(0, step - 1))}>{t("Back")}</button><button className="button dark" onClick={next}>{t(step === 6 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>; }
 
 function AddressStep({ label, value, kind, expanded, onExpand }: { label: string; value: string; kind: "pickup" | "delivery"; expanded: boolean; onExpand: () => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; const kindLabel = t(kind); return <section><p className="eyebrow">{t(isPickup ? "First stop" : "Last stop")}</p><h1>{label}</h1><label className="address-input">{t(isPickup ? "Pickup location" : "Delivery location")}<input defaultValue={value} /></label>{isPickup ? <div className="map"><span>IKEA Zagreb</span><i>{t("Pickup")}</i></div> : <div className="route-summary"><span>IKEA Zagreb</span><RouteLine /><span>Trešnjevka</span><b>12 km</b></div>}<button className="expand" onClick={onExpand}>{expanded ? t("Hide {kind} details", { kind: kindLabel }) : t("Add {kind} details", { kind: kindLabel })}</button>{expanded && <div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div>}</section>; }
-export function Registration() { const { t } = useLanguage(); const nav = useNavigate(); const [searchParams] = useSearchParams(); const [phone, setPhone] = useState(false); const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester"); return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!phone ? <><RolePicker value={role} onChange={setRole} /><GoogleSignInButton role={role} /><div className="or">{t("or")}</div><label>{t("Email")}<input type="email" placeholder="you@example.com" /></label><label>{t("Password")}<input type="password" placeholder={t("Create a password")} /></label><button className="button dark full auth-create-button" onClick={() => setPhone(true)}>{t("Create account")} <Arrow /></button></> : <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><p>{t("We’ll text a six-digit code to keep VanScout trusted for everyone.")}</p><label>{t("Phone number")}<input defaultValue="+385 91 555 2400" /></label><div className="otp">{[1,2,3,4,5,6].map(n => <input aria-label={`${t("Digit")} ${n}`} key={n} maxLength={1} />)}</div><button className="button dark full" onClick={() => nav(role === "transporter" ? "/carrier" : "/customer")}>{t(role === "transporter" ? "Continue to dashboard" : "Verify and publish")} <Arrow /></button><button className="quiet-link center">{t("Send a new code")}</button></>}</main></div>; }
+export function Registration() {
+  const { t } = useLanguage();
+  const nav = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [phone, setPhone] = useState(false);
+  const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setAuthError("");
+    try {
+      const response = await fetch("/api/auth/password/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const payload = await response.json() as { token?: string; error?: string };
+      if (!response.ok || !payload.token) throw new Error(payload.error || t("Unable to sign in"));
+      window.localStorage.setItem("auth_token", payload.token);
+      nav(role === "transporter" ? "/carrier" : "/customer");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : t("Unable to sign in"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!phone ? <><RolePicker value={role} onChange={setRole} /><GoogleSignInButton role={role} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Create a password")} autoComplete="current-password" required /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Create account")} <Arrow /></button></form></> : <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><p>{t("We’ll text a six-digit code to keep VanScout trusted for everyone.")}</p><label>{t("Phone number")}<input defaultValue="+385 91 555 2400" /></label><div className="otp">{[1,2,3,4,5,6].map(n => <input aria-label={`${t("Digit")} ${n}`} key={n} maxLength={1} />)}</div><button className="button dark full" onClick={() => nav(role === "transporter" ? "/carrier" : "/customer")}>{t(role === "transporter" ? "Continue to dashboard" : "Verify and publish")} <Arrow /></button><button className="quiet-link center">{t("Send a new code")}</button></>}</main></div>;
+}
+
+export function ForgotPassword() {
+  const { t } = useLanguage();
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/auth/password/forgot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const payload = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to send the reset email"));
+      setMessage(payload.message || t("If an account exists for this email, a reset link has been sent."));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Unable to send the reset email"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Password reset")}</p><h1>{t("Forgot your password?")}</h1><p>{t("Enter your email and we’ll send you a reset link.")}</p><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+}
+
+export function ResetPassword() {
+  const { t } = useLanguage();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token") || "";
+  const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/auth/password/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, password, passwordConfirmation }),
+      });
+      const payload = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to reset password"));
+      setMessage(payload.message || t("Password reset successfully"));
+      setPassword("");
+      setPasswordConfirmation("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Unable to reset password"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Password reset")}</p><h1>{t("Reset your password")}</h1>{!token ? <p className="auth-message error">{t("This reset link is invalid or expired")}</p> : <form className="auth-form" onSubmit={handleSubmit}><label>{t("New password")}<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" minLength={8} required /></label><label>{t("Confirm password")}<input type="password" value={passwordConfirmation} onChange={event => setPasswordConfirmation(event.target.value)} autoComplete="new-password" minLength={8} required /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Reset password")} <Arrow /></button></form>}<Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+}
 
 function RequestRow({ booked, onClick }: { booked?: boolean; onClick: () => void }) { const { t } = useLanguage(); return <article className="request-row"><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb <i>→</i> Trešnjevka</p><span className={`status ${booked ? "booked" : ""}`}>{booked ? t("Carrier booked") : t("3 offers · Looking for carriers")}</span></div><div className="request-meta"><b>12 km</b><span>{t("Flexible pickup")}</span></div><button className="button dark short" onClick={onClick}>{booked ? t("Open transport") : t("View offers")}</button></article>; }
 export function CustomerWorkspace() { const { t } = useLanguage(); const loc = useLocation(); const nav = useNavigate(); const [view, setView] = useState(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests"); const [detail, setDetail] = useState(false); const [accepted, setAccepted] = useState(false); const [offer, setOffer] = useState<Offer | null>(null); const [sort, setSort] = useState("Recommended"); const go = (next: string) => { setView(next); nav(next === "messages" ? "/customer/messages" : next === "profile" ? "/customer/profile" : "/customer"); }; const list = useMemo(() => sort === "Lowest price" ? [...OFFERS].sort((a, b) => Number(a.price.slice(1)) - Number(b.price.slice(1))) : OFFERS, [sort]); return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !detail && <section className="requests"><div className="workspace-title"><div><p className="eyebrow">{t("Your transport, at a glance")}</p><h1>{t("Your transports")}</h1></div><div className="tabs"><button className="selected">{t("Active")}</button><button>{t("Completed")}</button></div></div><div className="rows"><RequestRow onClick={() => setDetail(true)} /><RequestRow booked onClick={() => { setAccepted(true); setDetail(true); }} /></div></section>}{view === "requests" && detail && <RequestDetail accepted={accepted} sort={sort} onSort={setSort} offers={list} onBack={() => setDetail(false)} onOpenProfile={setOffer} onMessage={() => go("messages")} onAccept={setOffer} onTracking={() => nav("/tracking")} onReview={() => go("review")} />}{view === "messages" && <Messages onAccept={() => setOffer(OFFERS[0])} />}{view === "profile" && <CustomerProfile />}{view === "review" && <Review onDone={() => { go("requests"); setDetail(false); }} />}</main>{offer && <OfferDialog offer={offer} onClose={() => setOffer(null)} onAccept={() => { setAccepted(true); setOffer(null); }} onMessage={() => { setOffer(null); go("messages"); }} />}</div>; }

@@ -20,9 +20,11 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
+    "@types/nodemailer": "^8.0.1",
     "google-auth-library": "^10.5.0",
     "jose": "^6.1.0",
     "next": "^16.2.12",
+    "nodemailer": "^10.0.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^6.30.4",

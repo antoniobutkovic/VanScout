@@ -224,6 +224,15 @@ textarea { min-height: 105px; resize: vertical; }
 .auth h1 { font-size: clamp(2.85rem,5.3vw,4.35rem); margin-bottom: 25px; }
 .auth > main > p:not(.eyebrow) { margin-bottom: 27px; }
 .auth label { margin-bottom: 3px; }
+.auth-form { display: grid; }
+.password-field { margin-top: 20px; }
+.password-field label { margin-top: 0; }
+.forgot-password { display: inline-block; margin-top: 7px; color: var(--moss); font-size: 12px; font-weight: 700; }
+.forgot-password:hover, .auth-back:hover { color: var(--clay); }
+.auth-error, .auth-message { margin: 14px 0 0; font-size: 12px; line-height: 1.45; }
+.auth-error, .auth-message.error { color: var(--red); }
+.auth-message.success { color: var(--moss); }
+.auth-back { display: block; width: fit-content; margin: 28px auto 0; }
 .google-sign-in { width: 100%; min-height: 52px; }
 .google-sign-in > div { width: 100%; min-height: 52px; display: flex; justify-content: center; }
 .google-auth-error { margin: 10px 0 0; color: var(--red); font-size: 12px; }

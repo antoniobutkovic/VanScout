@@ -5,7 +5,9 @@ import {
   CustomerWorkspace,
   Home,
   LegalPage,
+  ForgotPassword,
   Registration,
+  ResetPassword,
   Tracking,
 } from "./screens/VanScout";
 
@@ -15,6 +17,8 @@ const App = () => (
       <Route path="/" element={<Home />} />
       <Route path="/create-request" element={<CreateRequest />} />
       <Route path="/auth" element={<Registration />} />
+      <Route path="/auth/forgot-password" element={<ForgotPassword />} />
+      <Route path="/auth/reset-password" element={<ResetPassword />} />
       <Route path="/customer/*" element={<CustomerWorkspace />} />
       <Route path="/carrier/*" element={<CarrierWorkspace />} />
       <Route path="/tracking" element={<Tracking />} />
