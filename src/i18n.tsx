@@ -164,7 +164,6 @@ const CROATIAN: Record<string, string> = {
   "Continue with Google": "Nastavite s Googleom",
   "Sign in with Google": "Prijavite se putem Googlea",
   "Google sign-in failed": "Prijava putem Googlea nije uspjela.",
-  "Google sign-in is not configured": "Prijava putem Googlea još nije konfigurirana.",
   "Google sign-in popup was blocked": "Google popup je blokiran. Dopustite popup prozore i pokušajte ponovno.",
   or: "ili",
   Email: "E-pošta",

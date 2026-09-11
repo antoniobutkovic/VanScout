@@ -24,16 +24,18 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const buttonRef = useRef<HTMLDivElement>(null);
+  const retryRef = useRef<() => void>(() => undefined);
   const [error, setError] = useState("");
+  const [showFallback, setShowFallback] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     const loadGoogleButton = async () => {
+      setShowFallback(true);
       try {
         const configResponse = await fetch("/api/auth/config");
         const config = await configResponse.json() as { google?: { enabled?: boolean; clientId?: string | null } };
         if (!config.google?.enabled || !config.google.clientId) {
-          setError(t("Google sign-in is not configured"));
           return;
         }
         if (!window.google) {
@@ -76,15 +78,17 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
         });
         buttonRef.current.replaceChildren();
         window.google.accounts.id.renderButton(buttonRef.current, { theme: "outline", size: "large", width: 360, text: "signin_with" });
+        setShowFallback(false);
       } catch {
-        if (!cancelled) setError(t("Google sign-in failed"));
+        // Keep the Google button visible while the SDK or configuration is unavailable.
       }
     };
+    retryRef.current = () => void loadGoogleButton();
     void loadGoogleButton();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; retryRef.current = () => undefined; };
   }, [navigate, role, t]);
 
-  return <div className="google-sign-in"><div ref={buttonRef} />{error && <p className="google-auth-error">{error}</p>}</div>;
+  return <div className="google-sign-in"><div ref={buttonRef} hidden={showFallback} />{showFallback && <button type="button" className="google google-fallback" onClick={() => retryRef.current()}><span className="google-mark" aria-hidden="true">G</span>{t("Continue with Google")}</button>}{error && <p className="google-auth-error">{error}</p>}</div>;
 }
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
