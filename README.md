@@ -38,6 +38,11 @@ Google sign-in uses Google Identity Services in the browser; the server
 verifies the returned ID token with `google-auth-library` and issues the
 VanScout JWT.
 
+Email delivery uses Zoho SMTP. `SMTP_USER` must be the exact mailbox that is
+allowed to send, and `SMTP_HOST` must match the server shown in that mailbox's
+Zoho Mail server configuration. The app sends using `SMTP_USER` directly, so a
+separate `MAIL_FROM` value is not required.
+
 The web experience includes the public landing pages, transport request wizard,
 customer offers and messaging workspace, carrier job flow, wallet, delivery
 tracking, and responsive mobile layouts.
