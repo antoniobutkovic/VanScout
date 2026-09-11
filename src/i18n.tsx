@@ -197,6 +197,7 @@ const CROATIAN: Record<string, string> = {
   "Show password": "Prikaži lozinku",
   "Hide password": "Sakrij lozinku",
   "Create a password": "Lozinka",
+  "Repeat your password": "Ponovite lozinku",
   "Create account": "Prijava",
   "Forgot your password?": "Zaboravili ste lozinku?",
   "Password reset": "Resetiranje lozinke",
