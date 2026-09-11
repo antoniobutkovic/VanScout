@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createEmailVerification, createPasswordUser } from "@/lib/database";
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: "An account with this email already exists" }, { status: 409 });
 
     const token = createVerificationToken();
-    await createEmailVerification(user.id, token);
+    await createEmailVerification(user.id, createHash("sha256").update(token).digest("hex"));
     const baseUrl = optionalEnv("APP_URL") || new URL(request.url).origin;
     const verificationUrl = `${baseUrl.replace(/\/$/, "")}/auth/verify-email?token=${encodeURIComponent(token)}`;
     await sendEmailVerificationEmail({ to: user.email, verificationUrl });
