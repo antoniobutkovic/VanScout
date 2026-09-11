@@ -7,7 +7,7 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "next dev --hostname 0.0.0.0 --port 3100",
+    "dev": "node scripts/run-with-env.mjs .env.staging next dev --hostname 0.0.0.0 --port 3100",
     "dev:staging": "node scripts/run-with-env.mjs .env.staging next dev --hostname 0.0.0.0 --port 3100",
     "build": "next build",
     "build:staging": "node scripts/run-with-env.mjs .env.staging next build",

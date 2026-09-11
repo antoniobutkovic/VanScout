@@ -16,11 +16,17 @@ npm run dev
 The API is served by the same process under `/api`. There is no separate local
 backend process and no `VITE_API_BASE_URL` or `ALLOWED_ORIGINS` requirement.
 
-For local development, use `.env.local`. Staging/Preview uses
-`.env.staging`, while production uses `.env.production`. Each environment
+The default `npm run dev` uses `.env.staging` so Google sign-in works locally.
+Staging/Preview uses `.env.staging`, while production uses `.env.production`. Each environment
 must have its own Neon database, Google Web client ID, and 32+ character JWT
 secret. Templates are available in `.env.staging.example` and
 `.env.production.example`.
+
+In Google Cloud, add `http://localhost:3100` and
+`https://van-scout-git-staging-antonios-projects-d03311f7.vercel.app` to the
+Authorized JavaScript origins for the staging Web client. Use the stable
+staging alias rather than a per-deployment URL, since those URLs change after
+each deployment.
 
 ```bash
 npm run dev:staging
