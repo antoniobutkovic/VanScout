@@ -235,6 +235,11 @@ textarea { min-height: 105px; resize: vertical; }
 .password-confirmation { margin-top: 14px; }
 .password-field .password-confirmation { margin-top: 24px; }
 .password-confirmation span { display: block; }
+.password-control { position: relative; display: block; }
+.password-control input { padding-right: 68px; }
+.password-toggle { position: absolute; top: 50%; right: 11px; transform: translateY(-50%); border: 0; background: transparent; padding: 4px; color: var(--moss); font-size: 11px; font-weight: 800; }
+.password-toggle:hover { color: var(--clay); }
+.password-toggle:focus-visible { outline: none; color: var(--clay); box-shadow: 0 0 0 2px rgba(53,74,46,.16); }
 .field-error { margin: 2px 0 0; color: var(--red); font-size: 11px; font-weight: 600; line-height: 1.35; }
 .auth input[aria-invalid="true"] { border-color: var(--red); }
 .auth-verification-link { display: block; margin-top: 14px; color: var(--moss); font-size: 12px; font-weight: 700; }
