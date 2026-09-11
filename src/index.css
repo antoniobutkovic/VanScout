@@ -227,7 +227,7 @@ textarea { min-height: 105px; resize: vertical; }
 .auth-form { display: grid; }
 .password-field { margin-top: 20px; }
 .password-field label { margin-top: 0; }
-.forgot-password { display: inline-block; margin-top: 7px; color: var(--moss); font-size: 12px; font-weight: 700; }
+.forgot-password { display: block; width: fit-content; margin: 7px 0 0 auto; color: var(--moss); font-size: 12px; font-weight: 700; }
 .forgot-password:hover, .auth-back:hover { color: var(--clay); }
 .auth-error, .auth-message { margin: 14px 0 0; font-size: 12px; line-height: 1.45; }
 .auth-error, .auth-message.error { color: var(--red); }
