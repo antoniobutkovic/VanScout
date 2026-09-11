@@ -283,7 +283,7 @@ export function ForgotPassword() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p>{t("Enter your email to reset your password")}</p><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
 }
 
 export function ResetPassword() {

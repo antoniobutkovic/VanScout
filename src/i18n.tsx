@@ -196,6 +196,7 @@ const CROATIAN: Record<string, string> = {
   "Create account": "Prijava",
   "Forgot your password?": "Zaboravili ste lozinku?",
   "Password reset": "Resetiranje lozinke",
+  "Enter your email to reset your password": "Unesite mail za resetiranje lozinke",
   "Enter your email and we’ll send you a reset link.": "Unesite svoju e-poštu i poslat ćemo vam poveznicu za resetiranje lozinke.",
   "Send reset link": "Pošalji poveznicu",
   "If an account exists for this email, a reset link has been sent.": "Ako račun s ovom e-poštom postoji, poslali smo poveznicu za resetiranje.",
