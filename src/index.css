@@ -233,6 +233,7 @@ textarea { min-height: 105px; resize: vertical; }
 .auth-signup-prompt a { color: var(--moss); font-weight: 700; }
 .auth-signup-prompt a:hover { color: var(--clay); }
 .password-confirmation { margin-top: 14px; }
+.password-field .password-confirmation { margin-top: 24px; }
 .password-confirmation span { display: block; }
 .field-error { margin: 2px 0 0; color: var(--red); font-size: 11px; font-weight: 600; line-height: 1.35; }
 .auth input[aria-invalid="true"] { border-color: var(--red); }
