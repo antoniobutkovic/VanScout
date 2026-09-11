@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { IMAGES } from "../assets/images";
 import { LanguagePicker, useLanguage } from "../i18n";
@@ -23,7 +23,6 @@ function RolePicker({ value, onChange }: { value: AuthRole; onChange: (value: Au
 function GoogleSignInButton({ role }: { role: AuthRole }) {
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const buttonRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -53,7 +52,7 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
             document.head.appendChild(script);
           });
         }
-        if (cancelled || !buttonRef.current || !window.google) return;
+        if (cancelled || !window.google) return;
         window.google.accounts.id.initialize({
           client_id: config.google.clientId,
           callback: async response => {
@@ -73,17 +72,15 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
             }
           },
         });
-        buttonRef.current.replaceChildren();
-        window.google.accounts.id.renderButton(buttonRef.current, { theme: "outline", size: "large", width: 360, text: "signin_with" });
       } catch {
-        // Keep the original Google button slot empty until the SDK is available.
+        // Keep the original Google button visible until the SDK is available.
       }
     };
     void loadGoogleButton();
     return () => { cancelled = true; };
   }, [navigate, role, t]);
 
-  return <div className="google-sign-in"><div ref={buttonRef} />{error && <p className="google-auth-error">{error}</p>}</div>;
+  return <div className="google-sign-in"><button type="button" className="google" onClick={() => window.google?.accounts.id.prompt()}>G <span>{t("Continue with Google")}</span></button>{error && <p className="google-auth-error">{error}</p>}</div>;
 }
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
