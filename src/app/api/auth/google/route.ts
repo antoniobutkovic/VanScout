@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { upsertGoogleUser, type AccountRole } from "@/lib/database";
+import { upsertGoogleUser } from "@/lib/database";
 import { createSessionToken } from "@/lib/session";
 import { verifyGoogleIdToken } from "@/lib/google";
 
 const bodySchema = z.object({
   idToken: z.string().min(1),
-  role: z.enum(["requester", "transporter"]).default("requester"),
+  role: z.enum(["requester", "transporter"]).optional(),
 });
 
 export async function POST(request: Request) {
   try {
     const body = bodySchema.parse(await request.json());
     const identity = await verifyGoogleIdToken(body.idToken);
-    const user = await upsertGoogleUser(identity, body.role as AccountRole);
+    const user = await upsertGoogleUser(identity, body.role);
     const token = await createSessionToken(user);
     return NextResponse.json({ token, user });
   } catch (error) {

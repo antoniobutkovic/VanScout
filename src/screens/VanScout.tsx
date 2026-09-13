@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent, type InputHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type InputHTMLAttributes, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { RecaptchaVerifier, signInWithPhoneNumber, signOut, type Auth, type ConfirmationResult } from "firebase/auth";
+import { AsYouType, getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
 import { IMAGES } from "../assets/images";
 import { LanguagePicker, useLanguage } from "../i18n";
 import { Picker } from "../components/Picker";
+import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-phone";
 
 type Offer = { name: string; price: string; rating: string; jobs: string; vehicle: string; time: string; note: string; initials: string; tone: string };
 type AuthRole = "requester" | "transporter";
@@ -25,11 +28,33 @@ function PasswordControl(props: InputHTMLAttributes<HTMLInputElement>) {
 }
 function RoleIcon({ role }: { role: AuthRole }) { return role === "transporter" ? <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 9.5h15v12H4zM19 14h5l4 4v3.5h-9zM8 25a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM24 25a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" /><path d="M19 17.5h8M7 9.5V7h8" /></svg> : <svg viewBox="0 0 32 32" aria-hidden="true"><path d="m4 10 12-5 12 5-12 5L4 10Z" /><path d="M7 12.5V21l9 4 9-4v-8.5M12 13.5v8M20 13.5v8" /></svg>; }
 function RolePicker({ value, onChange }: { value: AuthRole; onChange: (value: AuthRole) => void }) { const { t } = useLanguage(); const options: { value: AuthRole; label: string }[] = [{ value: "requester", label: t("Requester") }, { value: "transporter", label: t("Transporter") }]; return <fieldset className="auth-role-picker"><legend className="picker-label">{t("Account type")}</legend><div className="role-picker-options" role="radiogroup" aria-label={t("Account type")}>{options.map(option => <button type="button" role="radio" aria-checked={value === option.value} className={`role-option ${value === option.value ? "selected" : ""}`} key={option.value} onClick={() => onChange(option.value)}><span className="role-option-icon"><RoleIcon role={option.value} /></span><span>{option.label}</span></button>)}</div></fieldset>; }
-function GoogleSignInButton({ role }: { role: AuthRole }) {
+type AuthenticatedUser = { role: AuthRole; phoneVerified?: boolean };
+type AuthConfig = {
+  firebase?: ({ enabled: false; testMode: boolean } | ({ enabled: true } & FirebasePhoneConfig));
+};
+
+function firebasePhoneError(error: unknown, translate: (key: string) => string) {
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+  const messages: Record<string, string> = {
+    "auth/invalid-phone-number": "Enter a valid mobile number for the selected country",
+    "auth/missing-phone-number": "Enter a valid mobile number for the selected country",
+    "auth/invalid-verification-code": "The verification code is incorrect",
+    "auth/code-expired": "The verification code has expired. Send a new code.",
+    "auth/too-many-requests": "Too many attempts. Please wait before trying again.",
+    "auth/quota-exceeded": "The SMS verification limit has been reached. Please try again later.",
+    "auth/captcha-check-failed": "The security check failed. Please try again.",
+    "auth/invalid-app-credential": "The security check expired. Please try again.",
+  };
+  return translate(messages[code] || "Unable to verify phone number");
+}
+
+function GoogleSignInButton({ role, onAuthenticated }: { role?: AuthRole; onAuthenticated: (token: string, user: AuthenticatedUser) => void }) {
   const { t } = useLanguage();
-  const navigate = useNavigate();
   const [error, setError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const onAuthenticatedRef = useRef(onAuthenticated);
+
+  useEffect(() => { onAuthenticatedRef.current = onAuthenticated; }, [onAuthenticated]);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,12 +93,11 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
               const authResponse = await fetch("/api/auth/google", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ idToken: response.credential, role }),
+                body: JSON.stringify({ idToken: response.credential, ...(role ? { role } : {}) }),
               });
-              const payload = await authResponse.json() as { token?: string; error?: string };
-              if (!authResponse.ok || !payload.token) throw new Error(payload.error || t("Google sign-in failed"));
-              window.localStorage.setItem("auth_token", payload.token);
-              navigate(role === "transporter" ? "/carrier" : "/customer");
+              const payload = await authResponse.json() as { token?: string; user?: AuthenticatedUser; error?: string };
+              if (!authResponse.ok || !payload.token || !payload.user) throw new Error(payload.error || t("Google sign-in failed"));
+              onAuthenticatedRef.current(payload.token, payload.user);
             } catch (authError) {
               setIsSigningIn(false);
               setError(authError instanceof Error ? authError.message : t("Google sign-in failed"));
@@ -86,7 +110,7 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
     };
     void loadGoogleButton();
     return () => { cancelled = true; };
-  }, [navigate, role, t]);
+  }, [role, t]);
 
   const handleGoogleClick = () => {
     setError("");
@@ -107,6 +131,47 @@ function GoogleSignInButton({ role }: { role: AuthRole }) {
   };
 
   return <div className="google-sign-in"><button type="button" className="google" disabled={isSigningIn} aria-busy={isSigningIn} onClick={handleGoogleClick}>G <span>{t("Continue with Google")}</span></button>{error && <p className="google-auth-error">{error}</p>}</div>;
+}
+
+function OtpInput({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  const { t } = useLanguage();
+  const inputs = useRef<Array<HTMLInputElement | null>>([]);
+  const digits = Array.from({ length: 6 }, (_, index) => value[index] || "");
+  const update = (index: number, nextValue: string) => {
+    const digit = nextValue.replace(/\D/g, "").slice(-1);
+    const next = [...digits];
+    next[index] = digit;
+    onChange(next.join(""));
+    if (digit && index < 5) inputs.current[index + 1]?.focus();
+  };
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (event.key === "Backspace" && !digits[index] && index > 0) inputs.current[index - 1]?.focus();
+    if (event.key === "ArrowLeft" && index > 0) inputs.current[index - 1]?.focus();
+    if (event.key === "ArrowRight" && index < 5) inputs.current[index + 1]?.focus();
+  };
+  return <div className="otp" onPaste={event => {
+    const pasted = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+    event.preventDefault();
+    onChange(pasted);
+    inputs.current[Math.min(pasted.length, 6) - 1]?.focus();
+  }}>{digits.map((digit, index) => <input ref={element => { inputs.current[index] = element; }} key={index} aria-label={`${t("Digit")} ${index + 1}`} inputMode="numeric" autoComplete={index === 0 ? "one-time-code" : "off"} pattern="[0-9]*" maxLength={1} value={digit} disabled={disabled} onChange={event => update(index, event.target.value)} onKeyDown={event => handleKeyDown(event, index)} />)}</div>;
+}
+
+const COUNTRIES = getCountries();
+function PhoneNumberField({ country, localNumber, onCountryChange, onNumberChange, error }: { country: CountryCode; localNumber: string; onCountryChange: (country: CountryCode) => void; onNumberChange: (number: string) => void; error?: string }) {
+  const { language, t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const names = useMemo(() => new Intl.DisplayNames([language], { type: "region" }), [language]);
+  const options = useMemo(() => COUNTRIES.map(code => ({ code, name: names.of(code) || code, dial: getCountryCallingCode(code) })).sort((a, b) => a.name.localeCompare(b.name, language)), [language, names]);
+  const filtered = options.filter(option => `${option.name} ${option.code} +${option.dial}`.toLocaleLowerCase(language).includes(query.trim().toLocaleLowerCase(language)));
+  const selected = options.find(option => option.code === country)!;
+  return <div className="phone-field"><span className="picker-label">{t("Phone number")}</span><div className="phone-input-row"><div className="country-combobox"><button type="button" className="country-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(current => !current)}><span>{country}</span><b>+{selected.dial}</b><i>⌄</i></button>{open && <div className="country-menu"><input value={query} autoFocus onChange={event => setQuery(event.target.value)} placeholder={t("Search country")} aria-label={t("Search country")} /><div role="listbox" aria-label={t("Country")}>{filtered.map(option => <button type="button" role="option" aria-selected={option.code === country} key={option.code} onClick={() => { onCountryChange(option.code); setOpen(false); setQuery(""); }}><span>{option.name}</span><b>+{option.dial}</b></button>)}{filtered.length === 0 && <p>{t("No countries found")}</p>}</div></div>}</div><input className="phone-number-input" type="tel" inputMode="tel" autoComplete="tel-national" value={localNumber} aria-invalid={Boolean(error)} onChange={event => {
+    const raw = event.target.value.replace(/[^\d\s()-]/g, "");
+    const digitsOnly = raw.replace(/\D/g, "");
+    onNumberChange(new AsYouType(country).input(digitsOnly));
+  }} placeholder={t("91 234 5678")} /></div><small className="phone-format-help">{t("Enter the rest of your number without the country code. Spaces are added automatically.")}</small>{error && <span className="field-error" role="alert">{error}</span>}</div>;
 }
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
@@ -144,23 +209,47 @@ export function CreateRequest() { const { t } = useLanguage(); const nav = useNa
 
 function AddressStep({ label, value, kind, expanded, onExpand }: { label: string; value: string; kind: "pickup" | "delivery"; expanded: boolean; onExpand: () => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; const kindLabel = t(kind); return <section><p className="eyebrow">{t(isPickup ? "First stop" : "Last stop")}</p><h1>{label}</h1><label className="address-input">{t(isPickup ? "Pickup location" : "Delivery location")}<input defaultValue={value} /></label>{isPickup ? <div className="map"><span>IKEA Zagreb</span><i>{t("Pickup")}</i></div> : <div className="route-summary"><span>IKEA Zagreb</span><RouteLine /><span>Trešnjevka</span><b>12 km</b></div>}<button className="expand" onClick={onExpand}>{expanded ? t("Hide {kind} details", { kind: kindLabel }) : t("Add {kind} details", { kind: kindLabel })}</button>{expanded && <div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div>}</section>; }
 export function Registration() {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
-  const [phone, setPhone] = useState(false);
+  type AuthStage = "login" | "role" | "profile" | "email-code" | "phone" | "phone-code";
+  const requestedMode = searchParams.get("mode");
+  const verificationEmail = searchParams.get("verifyEmail") || "";
+  const [stage, setStage] = useState<AuthStage>(verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login");
   const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester");
-  const [email, setEmail] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState(verificationEmail);
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordConfirmationError, setPasswordConfirmationError] = useState("");
   const [authError, setAuthError] = useState("");
-  const [needsEmailVerification, setNeedsEmailVerification] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const isRegistering = searchParams.get("mode") === "register";
+  const [emailCode, setEmailCode] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
+  const [country, setCountry] = useState<CountryCode>("HR");
+  const [localNumber, setLocalNumber] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+  const [message, setMessage] = useState("");
+  const confirmationResult = useRef<ConfirmationResult | null>(null);
+  const recaptchaVerifier = useRef<RecaptchaVerifier | null>(null);
+  const firebaseAuth = useRef<Auth | null>(null);
+
+  useEffect(() => () => {
+    recaptchaVerifier.current?.clear();
+    recaptchaVerifier.current = null;
+  }, []);
+
+  useEffect(() => {
+    setStage(verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login");
+    if (verificationEmail) setEmail(verificationEmail);
+    setAuthError("");
+    setMessage("");
+  }, [requestedMode, verificationEmail]);
 
   const validatePasswords = () => {
-    if (!isRegistering) return true;
+    if (stage !== "profile") return true;
     const nextPasswordError = password.length < 8 ? t("Password must be at least 8 characters") : "";
     const nextConfirmationError = password !== passwordConfirmation ? t("Passwords do not match") : "";
     setPasswordError(nextPasswordError);
@@ -173,36 +262,146 @@ export function Registration() {
     if (!validatePasswords()) return;
     setSubmitting(true);
     setAuthError("");
-    setNeedsEmailVerification(false);
     try {
-      const response = await fetch(isRegistering ? "/api/auth/password/register" : "/api/auth/password/login", {
+      const response = await fetch(stage === "profile" ? "/api/auth/password/register" : "/api/auth/password/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, passwordConfirmation, role }),
+        body: JSON.stringify({ firstName, lastName, email, password, passwordConfirmation, role }),
       });
-      const payload = await response.json() as { token?: string; email?: string; error?: string; code?: string };
+      const payload = await response.json() as { token?: string; email?: string; user?: AuthenticatedUser; error?: string; code?: string };
       if (!response.ok) {
         if (payload.code === "EMAIL_NOT_VERIFIED") {
-          setNeedsEmailVerification(true);
-          throw new Error(t("Please verify your email before signing in"));
+          await fetch("/api/auth/email/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+          setStage("email-code");
+          setMessage(t("We sent a new six-digit code to your email."));
+          return;
         }
-        throw new Error(payload.error || t(isRegistering ? "Unable to create account" : "Unable to sign in"));
+        throw new Error(payload.error || t(stage === "profile" ? "Unable to create account" : "Unable to sign in"));
       }
-      if (isRegistering) {
-        nav(`/auth/check-email?email=${encodeURIComponent(payload.email || email)}`);
+      if (stage === "profile") {
+        setEmail(payload.email || email);
+        setStage("email-code");
+        setMessage(t("We sent a six-digit code to your email."));
         return;
       }
-      if (!payload.token) throw new Error(t("Unable to sign in"));
+      if (!payload.token || !payload.user) throw new Error(t("Unable to sign in"));
       window.localStorage.setItem("auth_token", payload.token);
-      nav(role === "transporter" ? "/carrier" : "/customer");
+      setRole(payload.user.role);
+      if (!payload.user.phoneVerified) {
+        setStage("phone");
+        return;
+      }
+      nav(payload.user.role === "transporter" ? "/carrier" : "/customer");
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : t(isRegistering ? "Unable to create account" : "Unable to sign in"));
+      setAuthError(error instanceof Error ? error.message : t(stage === "profile" ? "Unable to create account" : "Unable to sign in"));
     } finally {
       setSubmitting(false);
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!phone ? <><RolePicker value={role} onChange={setRole} /><GoogleSignInButton role={role} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); if (isRegistering) { setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); } }} placeholder={t("Create a password")} autoComplete={isRegistering ? "new-password" : "current-password"} minLength={isRegistering ? 8 : undefined} aria-invalid={Boolean(passwordError)} required />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label>{isRegistering && <label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordConfirmationError)} required />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label>}{!isRegistering && <Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link>}</div>{authError && <p className="auth-error">{authError}</p>}{needsEmailVerification && <Link className="auth-verification-link" to={`/auth/check-email?email=${encodeURIComponent(email)}`}>{t("Resend verification email")}</Link>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t(isRegistering ? "Register" : "Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t(isRegistering ? "Already have an account?" : "Don't have an account?")} <Link to={isRegistering ? "/auth" : "/auth?mode=register"}>{t(isRegistering ? "Sign in here" : "Create one here")}</Link></p></> : <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><p>{t("We’ll text a six-digit code to keep VanScout trusted for everyone.")}</p><label>{t("Phone number")}<input defaultValue="+385 91 555 2400" /></label><div className="otp">{[1,2,3,4,5,6].map(n => <input aria-label={`${t("Digit")} ${n}`} key={n} maxLength={1} />)}</div><button className="button dark full" onClick={() => nav(role === "transporter" ? "/carrier" : "/customer")}>{t(role === "transporter" ? "Continue to dashboard" : "Verify and publish")} <Arrow /></button><button className="quiet-link center">{t("Send a new code")}</button></>}</main></div>;
+  const authenticated = (token: string, user: AuthenticatedUser) => {
+    window.localStorage.setItem("auth_token", token);
+    setRole(user.role);
+    if (user.phoneVerified) nav(user.role === "transporter" ? "/carrier" : "/customer");
+    else setStage("phone");
+  };
+
+  const verifyEmailCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (emailCode.length !== 6) return setAuthError(t("Enter the complete six-digit code"));
+    setSubmitting(true); setAuthError(""); setMessage("");
+    try {
+      const response = await fetch("/api/auth/email/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: emailCode }) });
+      const payload = await response.json() as { token?: string; user?: AuthenticatedUser; error?: string };
+      if (!response.ok || !payload.token || !payload.user) throw new Error(payload.error || t("Unable to verify your email"));
+      window.localStorage.setItem("auth_token", payload.token);
+      setRole(payload.user.role);
+      setStage("phone");
+    } catch (error) { setAuthError(error instanceof Error ? error.message : t("Unable to verify your email")); }
+    finally { setSubmitting(false); }
+  };
+
+  const resendEmailCode = async () => {
+    setSubmitting(true); setAuthError(""); setMessage("");
+    try {
+      const response = await fetch("/api/auth/email/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      const payload = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to send verification email"));
+      setMessage(t("A new six-digit code was sent."));
+    } catch (error) { setAuthError(error instanceof Error ? error.message : t("Unable to send verification email")); }
+    finally { setSubmitting(false); }
+  };
+
+  const parsedPhone = () => parsePhoneNumberFromString(localNumber, country);
+  const isMobilePhone = () => {
+    const parsed = parsedPhone();
+    const type = parsed?.getType();
+    return Boolean(parsed?.isValid() && parsed.country === country && (!type || type === "MOBILE" || type === "FIXED_LINE_OR_MOBILE"));
+  };
+  const sendPhoneCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsed = parsedPhone();
+    if (!parsed || !isMobilePhone()) return setPhoneError(t("Enter a valid mobile number for the selected country"));
+    setSubmitting(true); setPhoneError(""); setAuthError(""); setMessage("");
+    try {
+      const sessionToken = window.localStorage.getItem("auth_token") || "";
+      const [validationResponse, configResponse] = await Promise.all([
+        fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` }, body: JSON.stringify({ phoneNumber: parsed.number }) }),
+        fetch("/api/auth/config"),
+      ]);
+      const validationPayload = await validationResponse.json() as { error?: string };
+      if (!validationResponse.ok) throw new Error(validationPayload.error || t("Unable to send phone verification code"));
+
+      const configPayload = await configResponse.json() as AuthConfig;
+      if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error(t("Phone verification is not configured"));
+      const auth = getFirebasePhoneAuth(configPayload.firebase);
+      auth.languageCode = language;
+      firebaseAuth.current = auth;
+
+      recaptchaVerifier.current?.clear();
+      const verifier = new RecaptchaVerifier(auth, "firebase-phone-recaptcha", { size: "invisible" });
+      recaptchaVerifier.current = verifier;
+      confirmationResult.current = await signInWithPhoneNumber(auth, parsed.number, verifier);
+      setStage("phone-code");
+      setMessage(configPayload.firebase.testMode ? t("Use the six-digit test code configured for this phone number in Firebase.") : t("We sent a six-digit code to your phone."));
+    } catch (error) {
+      setAuthError(error instanceof Error && !('code' in error) ? error.message : firebasePhoneError(error, t));
+      confirmationResult.current = null;
+    } finally {
+      recaptchaVerifier.current?.clear();
+      recaptchaVerifier.current = null;
+      setSubmitting(false);
+    }
+  };
+
+  const verifyPhoneCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsed = parsedPhone();
+    if (!parsed || phoneCode.length !== 6) return setAuthError(t("Enter the complete six-digit code"));
+    if (!confirmationResult.current) return setAuthError(t("Send a new verification code before continuing."));
+    setSubmitting(true); setAuthError("");
+    try {
+      const credential = await confirmationResult.current.confirm(phoneCode);
+      const firebaseIdToken = await credential.user.getIdToken();
+      const response = await fetch("/api/auth/phone/verify", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${window.localStorage.getItem("auth_token") || ""}` }, body: JSON.stringify({ firebaseIdToken }) });
+      const payload = await response.json() as { user?: AuthenticatedUser; error?: string };
+      if (!response.ok || !payload.user) throw new Error(payload.error || t("Unable to verify phone number"));
+      if (firebaseAuth.current) await signOut(firebaseAuth.current);
+      confirmationResult.current = null;
+      nav(payload.user.role === "transporter" ? "/carrier" : "/customer");
+    } catch (error) { setAuthError(error instanceof Error && !('code' in error) ? error.message : firebasePhoneError(error, t)); }
+    finally { setSubmitting(false); }
+  };
+
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>
+    {stage === "login" && <><GoogleSignInButton onAuthenticated={authenticated} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" required /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to="/auth?mode=register">{t("Create one here")}</Link></p></>}
+    {stage === "role" && <><p className="eyebrow">{t("Create your account")}</p><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setStage("profile")}>{t("Continue")} <Arrow /></button><p className="auth-signup-prompt">{t("Already have an account?")} <Link to="/auth">{t("Sign in here")}</Link></p></>}
+    {stage === "profile" && <><p className="eyebrow">{t(role === "transporter" ? "Transporter account" : "Requester account")}</p><h1>{t("Create your account")}</h1><form className="auth-form" onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} autoComplete="given-name" required /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} autoComplete="family-name" required /></label></div><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordError)} required />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordConfirmationError)} required />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}>← {t("Back")}</button></>}
+    {stage === "email-code" && <><p className="eyebrow">{t("Confirm your email")}</p><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting}>{t("Send a new code")}</button></>}
+    {stage === "phone" && <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><div className="security-note"><b>{t("Why we verify your phone")}</b><p>{t("Once a transport is agreed, VanScout shares phone contacts between both people. A verified number makes coordination easier and helps show that each person is genuine, adding an important layer of safety.")}</p></div><form onSubmit={sendPhoneCode}><PhoneNumberField country={country} localNumber={localNumber} onCountryChange={value => { setCountry(value); setLocalNumber(""); setPhoneError(""); }} onNumberChange={value => { setLocalNumber(value); setPhoneError(""); }} error={phoneError} />{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full auth-create-button" type="submit" disabled={submitting}>{t("Send verification code")} <Arrow /></button></form></>}
+    {stage === "phone-code" && <><p className="eyebrow">{t("Confirm your phone")}</p><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsedPhone()?.formatInternational()}</strong>.</p><form onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
+    <div id="firebase-phone-recaptcha" />
+  </main></div>;
 }
 
 export function CheckEmail() {
@@ -233,7 +432,7 @@ export function CheckEmail() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Confirm your email")}</p><h1>{t("Check your email")}</h1><p>{t("We sent a verification link to")} <strong>{email}</strong>.</p><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button className="quiet-link center" type="button" onClick={() => void resend()} disabled={submitting}>{t("Resend verification email")}</button><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Confirm your email")}</p><h1>{t("Check your email")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<Link className="button dark full auth-create-button" to={`/auth?verifyEmail=${encodeURIComponent(email)}`}>{t("Continue verification")}</Link><button className="quiet-link center" type="button" onClick={() => void resend()} disabled={submitting}>{t("Send a new code")}</button><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
 }
 
 export function VerifyEmail() {

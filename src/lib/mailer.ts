@@ -37,14 +37,14 @@ export async function sendPasswordResetEmail({ to, resetUrl }: { to: string; res
   });
 }
 
-export async function sendEmailVerificationEmail({ to, verificationUrl }: { to: string; verificationUrl: string }) {
+export async function sendEmailVerificationEmail({ to, verificationCode }: { to: string; verificationCode: string }) {
   const { smtpUser, transporter } = getMailConfig();
   await transporter.sendMail({
     from: smtpUser,
     envelope: { from: smtpUser, to },
     to,
-    subject: "Confirm your VanScout email",
-    text: `Confirm your VanScout email using this link:\n\n${verificationUrl}\n\nThis link expires in 24 hours. If you did not create a VanScout account, you can ignore this email.`,
-    html: `<p>Confirm your VanScout email using the link below:</p><p><a href="${verificationUrl}">Confirm email</a></p><p>This link expires in 24 hours. If you did not create a VanScout account, you can ignore this email.</p>`,
+    subject: `${verificationCode} is your VanScout verification code`,
+    text: `Your VanScout email verification code is ${verificationCode}.\n\nThis code expires in 15 minutes. If you did not create a VanScout account, you can ignore this email.`,
+    html: `<p>Your VanScout email verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">${verificationCode}</p><p>This code expires in 15 minutes. If you did not create a VanScout account, you can ignore this email.</p>`,
   });
 }

@@ -1,4 +1,4 @@
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
@@ -25,4 +25,8 @@ export function createResetToken() {
 
 export function createVerificationToken() {
   return randomBytes(32).toString("hex");
+}
+
+export function createVerificationCode() {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
 }

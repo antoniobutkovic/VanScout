@@ -38,6 +38,24 @@ Google sign-in uses Google Identity Services in the browser; the server
 verifies the returned ID token with `google-auth-library` and issues the
 VanScout JWT.
 
+## Firebase phone verification
+
+VanScout sends and confirms phone verification codes with Firebase
+Authentication. Register a Web app in the Firebase project, enable the Phone
+provider under Authentication, and copy the Web app configuration into the
+`FIREBASE_*` values shown in the environment templates.
+
+For local Spark-plan testing, add fictional phone numbers and fixed six-digit
+codes under **Authentication → Sign-in method → Phone numbers for testing**, and
+set `FIREBASE_PHONE_TEST_MODE=true`. In this mode Firebase sends no SMS and real
+phone numbers intentionally fail. Set it to `false` in production.
+
+Add every deployed hostname to Firebase Authentication's authorized domains.
+The browser sends the code through Firebase and receives a signed ID token; the
+VanScout API validates that token against Firebase's public keys before marking
+the database phone number as verified. No Firebase service-account private key
+is required by this implementation.
+
 Email delivery uses Zoho SMTP. `SMTP_USER` must be the exact mailbox that is
 allowed to send, and `SMTP_HOST` must match the server shown in that mailbox's
 Zoho Mail server configuration. The app sends using `SMTP_USER` directly, so a
