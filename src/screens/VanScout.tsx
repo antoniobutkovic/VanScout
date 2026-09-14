@@ -174,6 +174,25 @@ function PhoneNumberField({ country, localNumber, onCountryChange, onNumberChang
   }} placeholder={t("91 234 5678")} /></div><small className="phone-format-help">{t("Enter the rest of your number without the country code. Spaces are added automatically.")}</small>{error && <span className="field-error" role="alert">{error}</span>}</div>;
 }
 
+function normalizedPhoneNumber(country: CountryCode, input: string, allowFictional: boolean) {
+  const parsed = parsePhoneNumberFromString(input, country);
+  const type = parsed?.getType();
+  if (parsed?.isValid() && parsed.country === country && (!type || type === "MOBILE" || type === "FIXED_LINE_OR_MOBILE")) {
+    return parsed.number;
+  }
+  if (!allowFictional) return null;
+
+  // Firebase test numbers may be syntactically valid E.164 values without
+  // matching a real country's assigned mobile ranges (for example,
+  // +38500000000). Preserve the exact digits so Firebase can match the
+  // fictional number configured in its console.
+  const digits = input.replace(/\D/g, "");
+  const dialCode = getCountryCallingCode(country);
+  const international = digits.startsWith(dialCode) ? digits : `${dialCode}${digits}`;
+  const e164 = `+${international}`;
+  return e164.startsWith(`+${dialCode}`) && /^\+[1-9]\d{7,14}$/.test(e164) ? e164 : null;
+}
+
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
   const { t } = useLanguage();
   return <div className="nav-actions">{kind ? <><button className="notice" aria-label={t("Notifications")}>◌</button><Link className="mini-avatar" to={kind === "carrier" ? "/carrier/profile" : "/customer/profile"}>{kind === "carrier" ? "MM" : "AN"}</Link>{kind === "customer" && <Link className="button dark short" to="/create-request">{t("New request")}</Link>}<LanguagePicker /></> : <><LanguagePicker /><Link className="sign-in" to="/auth">{t("Sign in")}</Link></>}</div>;
@@ -230,6 +249,7 @@ export function Registration() {
   const [phoneCode, setPhoneCode] = useState("");
   const [country, setCountry] = useState<CountryCode>("HR");
   const [localNumber, setLocalNumber] = useState("");
+  const [pendingPhoneNumber, setPendingPhoneNumber] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [message, setMessage] = useState("");
   const confirmationResult = useRef<ConfirmationResult | null>(null);
@@ -332,28 +352,21 @@ export function Registration() {
     finally { setSubmitting(false); }
   };
 
-  const parsedPhone = () => parsePhoneNumberFromString(localNumber, country);
-  const isMobilePhone = () => {
-    const parsed = parsedPhone();
-    const type = parsed?.getType();
-    return Boolean(parsed?.isValid() && parsed.country === country && (!type || type === "MOBILE" || type === "FIXED_LINE_OR_MOBILE"));
-  };
   const sendPhoneCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const parsed = parsedPhone();
-    if (!parsed || !isMobilePhone()) return setPhoneError(t("Enter a valid mobile number for the selected country"));
     setSubmitting(true); setPhoneError(""); setAuthError(""); setMessage("");
     try {
       const sessionToken = window.localStorage.getItem("auth_token") || "";
-      const [validationResponse, configResponse] = await Promise.all([
-        fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` }, body: JSON.stringify({ phoneNumber: parsed.number }) }),
-        fetch("/api/auth/config"),
-      ]);
+      const configResponse = await fetch("/api/auth/config");
+      const configPayload = await configResponse.json() as AuthConfig;
+      if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error(t("Phone verification is not configured"));
+      const phoneNumber = normalizedPhoneNumber(country, localNumber, configPayload.firebase.testMode);
+      if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
+
+      const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` }, body: JSON.stringify({ phoneNumber }) });
       const validationPayload = await validationResponse.json() as { error?: string };
       if (!validationResponse.ok) throw new Error(validationPayload.error || t("Unable to send phone verification code"));
 
-      const configPayload = await configResponse.json() as AuthConfig;
-      if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error(t("Phone verification is not configured"));
       const auth = getFirebasePhoneAuth(configPayload.firebase);
       auth.languageCode = language;
       firebaseAuth.current = auth;
@@ -361,7 +374,8 @@ export function Registration() {
       recaptchaVerifier.current?.clear();
       const verifier = new RecaptchaVerifier(auth, "firebase-phone-recaptcha", { size: "invisible" });
       recaptchaVerifier.current = verifier;
-      confirmationResult.current = await signInWithPhoneNumber(auth, parsed.number, verifier);
+      confirmationResult.current = await signInWithPhoneNumber(auth, phoneNumber, verifier);
+      setPendingPhoneNumber(phoneNumber);
       setStage("phone-code");
       setMessage(configPayload.firebase.testMode ? t("Use the six-digit test code configured for this phone number in Firebase.") : t("We sent a six-digit code to your phone."));
     } catch (error) {
@@ -376,8 +390,7 @@ export function Registration() {
 
   const verifyPhoneCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const parsed = parsedPhone();
-    if (!parsed || phoneCode.length !== 6) return setAuthError(t("Enter the complete six-digit code"));
+    if (!pendingPhoneNumber || phoneCode.length !== 6) return setAuthError(t("Enter the complete six-digit code"));
     if (!confirmationResult.current) return setAuthError(t("Send a new verification code before continuing."));
     setSubmitting(true); setAuthError("");
     try {
@@ -399,7 +412,7 @@ export function Registration() {
     {stage === "profile" && <><p className="eyebrow">{t(role === "transporter" ? "Transporter account" : "Requester account")}</p><h1>{t("Create your account")}</h1><form className="auth-form" onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} autoComplete="given-name" required /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} autoComplete="family-name" required /></label></div><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordError)} required />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordConfirmationError)} required />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}>← {t("Back")}</button></>}
     {stage === "email-code" && <><p className="eyebrow">{t("Confirm your email")}</p><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting}>{t("Send a new code")}</button></>}
     {stage === "phone" && <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><div className="security-note"><b>{t("Why we verify your phone")}</b><p>{t("Once a transport is agreed, VanScout shares phone contacts between both people. A verified number makes coordination easier and helps show that each person is genuine, adding an important layer of safety.")}</p></div><form onSubmit={sendPhoneCode}><PhoneNumberField country={country} localNumber={localNumber} onCountryChange={value => { setCountry(value); setLocalNumber(""); setPhoneError(""); }} onNumberChange={value => { setLocalNumber(value); setPhoneError(""); }} error={phoneError} />{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full auth-create-button" type="submit" disabled={submitting}>{t("Send verification code")} <Arrow /></button></form></>}
-    {stage === "phone-code" && <><p className="eyebrow">{t("Confirm your phone")}</p><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsedPhone()?.formatInternational()}</strong>.</p><form onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
+    {stage === "phone-code" && <><p className="eyebrow">{t("Confirm your phone")}</p><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsePhoneNumberFromString(pendingPhoneNumber)?.formatInternational() || pendingPhoneNumber}</strong>.</p><form onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); setPendingPhoneNumber(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
     <div id="firebase-phone-recaptcha" />
   </main></div>;
 }
