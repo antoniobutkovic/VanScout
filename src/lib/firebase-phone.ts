@@ -1,9 +1,13 @@
-import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
+import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 
 const APP_NAME = "vanscout-phone-auth";
 
-export type FirebasePhoneConfig = FirebaseOptions & {
+export type FirebasePhoneConfig = {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  appId: string;
   testMode: boolean;
 };
 
@@ -14,8 +18,8 @@ export function getFirebasePhoneAuth(config: FirebasePhoneConfig): Auth {
   const auth = getAuth(app);
 
   // Firebase's test mode accepts only fictional numbers configured in the
-  // Firebase console. It never sends an SMS and should never be enabled in
-  // staging or production.
+  // Firebase console. It never sends an SMS and must be disabled before real
+  // users are allowed to verify their numbers.
   auth.settings.appVerificationDisabledForTesting = config.testMode;
   return auth;
 }
