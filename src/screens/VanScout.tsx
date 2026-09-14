@@ -174,18 +174,17 @@ function PhoneNumberField({ country, localNumber, onCountryChange, onNumberChang
   }} placeholder={t("91 234 5678")} /></div><small className="phone-format-help">{t("Enter the rest of your number without the country code. Spaces are added automatically.")}</small>{error && <span className="field-error" role="alert">{error}</span>}</div>;
 }
 
-function normalizedPhoneNumber(country: CountryCode, input: string, allowFictional: boolean) {
+function normalizedPhoneNumber(country: CountryCode, input: string) {
   const parsed = parsePhoneNumberFromString(input, country);
   const type = parsed?.getType();
   if (parsed?.isValid() && parsed.country === country && (!type || type === "MOBILE" || type === "FIXED_LINE_OR_MOBILE")) {
     return parsed.number;
   }
-  if (!allowFictional) return null;
 
-  // Firebase test numbers may be syntactically valid E.164 values without
-  // matching a real country's assigned mobile ranges (for example,
-  // +38500000000). Preserve the exact digits so Firebase can match the
-  // fictional number configured in its console.
+  // Keep the E.164 structure check here, but let Firebase be authoritative
+  // about whether the number is a whitelisted fictional number or a real
+  // mobile range. This prevents libphonenumber metadata from rejecting a
+  // Firebase test number such as +38500000000.
   const digits = input.replace(/\D/g, "");
   const dialCode = getCountryCallingCode(country);
   const international = digits.startsWith(dialCode) ? digits : `${dialCode}${digits}`;
@@ -360,7 +359,7 @@ export function Registration() {
       const configResponse = await fetch("/api/auth/config");
       const configPayload = await configResponse.json() as AuthConfig;
       if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error(t("Phone verification is not configured"));
-      const phoneNumber = normalizedPhoneNumber(country, localNumber, configPayload.firebase.testMode);
+      const phoneNumber = normalizedPhoneNumber(country, localNumber);
       if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
 
       const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` }, body: JSON.stringify({ phoneNumber }) });
