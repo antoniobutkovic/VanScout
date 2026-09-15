@@ -119,7 +119,7 @@ export async function upsertGoogleUser(identity: GoogleIdentity, role?: AccountR
   const rows = await sql`
     INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, role)
     VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${identity.name}, ${firstName}, ${lastNameParts.join(" ")}, ${identity.avatarUrl}, NOW(), ${selectedRole})
-    ON CONFLICT (google_subject) DO UPDATE SET
+    ON CONFLICT DO UPDATE SET
       email = EXCLUDED.email,
       name = EXCLUDED.name,
       first_name = EXCLUDED.first_name,
