@@ -116,20 +116,44 @@ export async function upsertGoogleUser(identity: GoogleIdentity, role?: AccountR
   const sql = database();
   const selectedRole = role || "requester";
   const [firstName = identity.name, ...lastNameParts] = identity.name.trim().split(/\s+/);
-  const rows = await sql`
-    INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, role)
-    VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${identity.name}, ${firstName}, ${lastNameParts.join(" ")}, ${identity.avatarUrl}, NOW(), ${selectedRole})
-    ON CONFLICT DO UPDATE SET
-      email = EXCLUDED.email,
-      name = EXCLUDED.name,
-      first_name = EXCLUDED.first_name,
-      last_name = EXCLUDED.last_name,
-      avatar_url = EXCLUDED.avatar_url,
-      email_verified_at = NOW(),
-      role = CASE WHEN CAST(${role || null} AS TEXT) IS NULL THEN vanscout_users.role ELSE EXCLUDED.role END,
-      updated_at = NOW()
-    RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+  const existingRows = await sql`
+    SELECT id
+    FROM vanscout_users
+    WHERE google_subject = ${identity.subject}
+       OR LOWER(email) = LOWER(${identity.email})
+    ORDER BY CASE WHEN google_subject = ${identity.subject} THEN 0 ELSE 1 END
+    LIMIT 1
   `;
+  const existingId = existingRows[0] ? String(existingRows[0].id) : null;
+  const rows = existingId
+    ? await sql`
+        UPDATE vanscout_users
+        SET google_subject = ${identity.subject},
+            email = ${identity.email},
+            name = ${identity.name},
+            first_name = ${firstName},
+            last_name = ${lastNameParts.join(" ")},
+            avatar_url = ${identity.avatarUrl},
+            email_verified_at = NOW(),
+            role = CASE WHEN CAST(${role || null} AS TEXT) IS NULL THEN role ELSE ${selectedRole} END,
+            updated_at = NOW()
+        WHERE id = ${existingId}
+        RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+      `
+    : await sql`
+        INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, role)
+        VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${identity.name}, ${firstName}, ${lastNameParts.join(" ")}, ${identity.avatarUrl}, NOW(), ${selectedRole})
+        ON CONFLICT (email) DO UPDATE SET
+          google_subject = EXCLUDED.google_subject,
+          name = EXCLUDED.name,
+          first_name = EXCLUDED.first_name,
+          last_name = EXCLUDED.last_name,
+          avatar_url = EXCLUDED.avatar_url,
+          email_verified_at = NOW(),
+          role = CASE WHEN CAST(${role || null} AS TEXT) IS NULL THEN vanscout_users.role ELSE EXCLUDED.role END,
+          updated_at = NOW()
+        RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+      `;
   return toUser(rows[0] as Record<string, unknown>);
 }
 
