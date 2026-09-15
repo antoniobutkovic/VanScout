@@ -126,7 +126,7 @@ export async function upsertGoogleUser(identity: GoogleIdentity, role?: AccountR
       last_name = EXCLUDED.last_name,
       avatar_url = EXCLUDED.avatar_url,
       email_verified_at = NOW(),
-      role = CASE WHEN ${role || null} IS NULL THEN vanscout_users.role ELSE EXCLUDED.role END,
+      role = CASE WHEN CAST(${role || null} AS TEXT) IS NULL THEN vanscout_users.role ELSE EXCLUDED.role END,
       updated_at = NOW()
     RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
   `;
