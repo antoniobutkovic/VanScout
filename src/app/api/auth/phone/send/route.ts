@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
+import { bearerToken, verifyGoogleRegistrationToken } from "@/lib/session";
 
 const bodySchema = z.object({ phoneNumber: z.string().regex(/^\+[1-9]\d{7,14}$/) });
 
 export async function POST(request: Request) {
   const user = await authenticatedUser(request);
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {
+    const token = bearerToken(request);
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    try {
+      await verifyGoogleRegistrationToken(token);
+    } catch {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  }
 
   try {
     bodySchema.parse(await request.json());

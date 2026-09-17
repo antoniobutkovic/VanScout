@@ -1,21 +1,25 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type InputHTMLAttributes, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { RecaptchaVerifier, signInWithPhoneNumber, signOut, type Auth, type ConfirmationResult } from "firebase/auth";
 import { AsYouType, getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
 import { IMAGES } from "../assets/images";
 import { LanguagePicker, useLanguage } from "../i18n";
 import { Picker } from "../components/Picker";
+import { AddressPicker } from "../components/AddressPicker";
 import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-phone";
+import { loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
+import type { AddressLocation } from "../lib/location";
 
 type Offer = { name: string; price: string; rating: string; jobs: string; vehicle: string; time: string; note: string; initials: string; tone: string };
 type AuthRole = "requester" | "transporter";
+const EMAIL_RESEND_COOLDOWN_SECONDS = 60;
 const OFFERS: Offer[] = [
   { name: "Mario M.", price: "€32", rating: "4.9", jobs: "127 jobs", vehicle: "Renault Master", time: "Today, 17:00–19:00", note: "I’m already collecting another order near IKEA this afternoon.", initials: "MM", tone: "mario" },
   { name: "Luka P.", price: "€28", rating: "4.8", jobs: "81 jobs", vehicle: "Ford Transit", time: "Tomorrow, 10:00–12:00", note: "I can collect this on my morning route through Trešnjevka.", initials: "LP", tone: "luka" },
   { name: "Nikola R.", price: "€37", rating: "5.0", jobs: "42 jobs", vehicle: "Mercedes Sprinter", time: "Friday, 14:00–16:00", note: "Two-person pickup available if you need a hand with the load.", initials: "NR", tone: "nikola" },
 ];
 const CATEGORIES = ["Furniture", "Appliances", "Store purchase", "Motorcycle", "Boxes / pallets", "Other"];
-const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Details", "Review"];
+const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Review"];
 
 function Arrow() { return null; }
 function Mark() { return <Link className="brand" to="/">VanScout<span>.</span></Link>; }
@@ -28,7 +32,17 @@ function PasswordControl(props: InputHTMLAttributes<HTMLInputElement>) {
 }
 function RoleIcon({ role }: { role: AuthRole }) { return role === "transporter" ? <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 9.5h15v12H4zM19 14h5l4 4v3.5h-9zM8 25a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM24 25a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" /><path d="M19 17.5h8M7 9.5V7h8" /></svg> : <svg viewBox="0 0 32 32" aria-hidden="true"><path d="m4 10 12-5 12 5-12 5L4 10Z" /><path d="M7 12.5V21l9 4 9-4v-8.5M12 13.5v8M20 13.5v8" /></svg>; }
 function RolePicker({ value, onChange }: { value: AuthRole; onChange: (value: AuthRole) => void }) { const { t } = useLanguage(); const options: { value: AuthRole; label: string }[] = [{ value: "requester", label: t("Requester") }, { value: "transporter", label: t("Transporter") }]; return <fieldset className="auth-role-picker"><legend className="picker-label">{t("Account type")}</legend><div className="role-picker-options" role="radiogroup" aria-label={t("Account type")}>{options.map(option => <button type="button" role="radio" aria-checked={value === option.value} className={`role-option ${value === option.value ? "selected" : ""}`} key={option.value} onClick={() => onChange(option.value)}><span className="role-option-icon"><RoleIcon role={option.value} /></span><span>{option.label}</span></button>)}</div></fieldset>; }
+function useEmailResendCooldown(initiallyActive = false) {
+  const [remaining, setRemaining] = useState(initiallyActive ? EMAIL_RESEND_COOLDOWN_SECONDS : 0);
+  useEffect(() => {
+    if (remaining <= 0) return;
+    const timeout = window.setTimeout(() => setRemaining(current => Math.max(0, current - 1)), 1000);
+    return () => window.clearTimeout(timeout);
+  }, [remaining]);
+  return { remaining, start: () => setRemaining(EMAIL_RESEND_COOLDOWN_SECONDS) };
+}
 type AuthenticatedUser = { role: AuthRole; phoneVerified?: boolean };
+type GoogleRegistration = { token: string; profile: { email: string; firstName: string; lastName: string } };
 type AuthConfig = {
   firebase?: ({ enabled: false; testMode: boolean } | ({ enabled: true } & FirebasePhoneConfig));
 };
@@ -48,13 +62,42 @@ function firebasePhoneError(error: unknown, translate: (key: string) => string) 
   return translate(messages[code] || "Unable to verify phone number");
 }
 
-function GoogleSignInButton({ role, onAuthenticated }: { role?: AuthRole; onAuthenticated: (token: string, user: AuthenticatedUser) => void }) {
-  const { t } = useLanguage();
+function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: { role?: AuthRole; onAuthenticated: (token: string, user: AuthenticatedUser) => void; onRegistrationRequired: (registration: GoogleRegistration) => void }) {
+  const { language, t } = useLanguage();
   const [error, setError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+  const buttonContainerRef = useRef<HTMLDivElement | null>(null);
   const onAuthenticatedRef = useRef(onAuthenticated);
+  const onRegistrationRequiredRef = useRef(onRegistrationRequired);
+  const credentialHandlerRef = useRef<(response: google.accounts.id.CredentialResponse) => void>(() => undefined);
 
   useEffect(() => { onAuthenticatedRef.current = onAuthenticated; }, [onAuthenticated]);
+  useEffect(() => { onRegistrationRequiredRef.current = onRegistrationRequired; }, [onRegistrationRequired]);
+  credentialHandlerRef.current = response => {
+    setError("");
+    setIsSigningIn(true);
+    void (async () => {
+      try {
+        const authResponse = await fetch("/api/auth/google", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken: response.credential, ...(role ? { role } : {}) }),
+        });
+        const payload = await authResponse.json() as { token?: string; user?: AuthenticatedUser; requiresRegistration?: boolean; registrationToken?: string; profile?: GoogleRegistration["profile"]; error?: string };
+        if (!authResponse.ok) throw new Error(payload.error || t("Google sign-in failed"));
+        if (payload.requiresRegistration && payload.registrationToken && payload.profile) {
+          onRegistrationRequiredRef.current({ token: payload.registrationToken, profile: payload.profile });
+          return;
+        }
+        if (!payload.token || !payload.user) throw new Error(payload.error || t("Google sign-in failed"));
+        onAuthenticatedRef.current(payload.token, payload.user);
+      } catch (authError) {
+        setIsSigningIn(false);
+        setError(authError instanceof Error ? authError.message : t("Google sign-in failed"));
+      }
+    })();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -86,51 +129,36 @@ function GoogleSignInButton({ role, onAuthenticated }: { role?: AuthRole; onAuth
         if (cancelled || !window.google) return;
         window.google.accounts.id.initialize({
           client_id: config.google.clientId,
-          callback: async response => {
-            setError("");
-            setIsSigningIn(true);
-            try {
-              const authResponse = await fetch("/api/auth/google", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ idToken: response.credential, ...(role ? { role } : {}) }),
-              });
-              const payload = await authResponse.json() as { token?: string; user?: AuthenticatedUser; error?: string };
-              if (!authResponse.ok || !payload.token || !payload.user) throw new Error(payload.error || t("Google sign-in failed"));
-              onAuthenticatedRef.current(payload.token, payload.user);
-            } catch (authError) {
-              setIsSigningIn(false);
-              setError(authError instanceof Error ? authError.message : t("Google sign-in failed"));
-            }
-          },
+          callback: response => credentialHandlerRef.current(response),
+          ux_mode: "popup",
+          use_fedcm_for_button: false,
         });
+        setGoogleReady(true);
       } catch {
-        // Keep the original Google button visible until the SDK is available.
+        setError(t("Google sign-in failed"));
       }
     };
     void loadGoogleButton();
     return () => { cancelled = true; };
-  }, [role, t]);
+  }, []);
 
-  const handleGoogleClick = () => {
-    setError("");
-    setIsSigningIn(true);
-    try {
-      if (!window.google) {
-        setIsSigningIn(false);
-        return;
-      }
-      window.google.accounts.id.prompt(notification => {
-        if (notification.isNotDisplayed() || notification.isSkippedMoment() || notification.isDismissedMoment()) {
-          setIsSigningIn(false);
-        }
-      });
-    } catch {
-      setIsSigningIn(false);
-    }
-  };
+  useEffect(() => {
+    if (!googleReady || !window.google || !buttonContainerRef.current) return;
+    const container = buttonContainerRef.current;
+    container.replaceChildren();
+    window.google.accounts.id.renderButton(container, {
+      type: "standard",
+      theme: "outline",
+      size: "large",
+      text: "continue_with",
+      shape: "rectangular",
+      logo_alignment: "center",
+      width: Math.min(400, container.clientWidth || 400),
+      locale: language,
+    });
+  }, [googleReady, language]);
 
-  return <div className="google-sign-in"><button type="button" className="google" disabled={isSigningIn} aria-busy={isSigningIn} onClick={handleGoogleClick}>G <span>{t("Continue with Google")}</span></button>{error && <p className="google-auth-error">{error}</p>}</div>;
+  return <div className={`google-sign-in ${isSigningIn ? "is-loading" : ""}`} aria-busy={isSigningIn}><div ref={buttonContainerRef} />{error && <p className="google-auth-error">{error}</p>}</div>;
 }
 
 function OtpInput({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
@@ -171,7 +199,7 @@ function PhoneNumberField({ country, localNumber, onCountryChange, onNumberChang
     const raw = event.target.value.replace(/[^\d\s()-]/g, "");
     const digitsOnly = raw.replace(/\D/g, "");
     onNumberChange(new AsYouType(country).input(digitsOnly));
-  }} placeholder={t("91 234 5678")} /></div><small className="phone-format-help">{t("Enter the rest of your number without the country code. Spaces are added automatically.")}</small>{error && <span className="field-error" role="alert">{error}</span>}</div>;
+  }} placeholder={t("91 234 5678")} /></div>{error && <span className="field-error" role="alert">{error}</span>}</div>;
 }
 
 function normalizedPhoneNumber(country: CountryCode, input: string) {
@@ -223,9 +251,90 @@ export function Home() {
   return <div className="site"><Topbar /><main><section className="home-hero"><div className="home-copy"><h1>{t("Request or offer transport services without the hassle.")}</h1><div className="actions"><Link className="button moss" to="/create-request">{t("Request transport")} <Arrow /></Link><Link className="quiet-link" to="/auth?role=transporter">{t("I'm a carrier")}</Link></div></div><div className="hero-image"><img src={IMAGES.HOME_DOT_HERO} alt={t("Furniture and boxes being loaded into a cargo van.")} /><div className="hero-sticker"><span>{t("Today")}</span><RouteLine small /><b>IKEA Zagreb → Trešnjevka</b></div></div></section><section className="steps"><div className="workflow-rows">{workflows.map(({ audience, steps }) => <section className="workflow-row" key={audience}><h2>{t(audience)}</h2><div>{steps.map(([number, title, copy]) => <article key={number}><span>{number}</span><h3>{t(title)}</h3><p>{t(copy)}</p></article>)}</div></section>)}</div></section><section className="trust"><div><h2>{t("Choose with confidence.")}</h2></div><ul><li>{t("Verified phone numbers")}</li><li>{t("Carrier profiles and vehicles")}</li><li>{t("Real reviews after every job")}</li></ul></section></main><Footer /></div>;
 }
 
-export function CreateRequest() { const { t } = useLanguage(); const nav = useNavigate(); const [step, setStep] = useState(0); const [category, setCategory] = useState("Furniture"); const [timing, setTiming] = useState("I’m flexible"); const [expanded, setExpanded] = useState(""); const next = () => step === 6 ? nav("/auth") : setStep(step + 1); return <div className="wizard"><header><Mark /><div className="wizard-header-actions"><span>{step + 1} / 7</span><LanguagePicker /><Link to="/">×</Link></div></header><div className="wizard-progress"><b style={{ width: `${(step + 1) * 14.285}%` }} />{WIZARD_STEPS.map((label, index) => <span className={index === step ? "current" : ""} key={label}>{t(label)}</span>)}</div><main>{step === 0 && <section><p className="eyebrow">{t("Start with the thing")}</p><h1>{t("What are you moving?")}</h1><div className="choices">{CATEGORIES.map(item => <button className={category === item ? "selected" : ""} key={item} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><label>{t("Item name")}<input defaultValue={t("Bed slats")} /></label><label>{t("Description")} <em>{t("Optional")}</em><textarea placeholder={t("Anything carriers should know about the item?")} /></label><button className="expand" onClick={() => setExpanded(expanded === "size" ? "" : "size")}>{expanded === "size" ? t("− Hide dimensions") : t("+ Add dimensions")}</button>{expanded === "size" && <div className="inline-inputs"><label>{t("Length")}<input placeholder="cm" /></label><label>{t("Width")}<input placeholder="cm" /></label><label>{t("Weight")}<input placeholder="kg" /></label></div>}</section>}{step === 1 && <section className="visual-step"><p className="eyebrow">{t("A better offer starts here")}</p><h1>{t("Show carriers what they’re moving.")}</h1><div className="drop"><b>＋</b><strong>{t("Drop photos here")}</strong><span>{t("or choose from your device")}</span><button className="button dark short">{t("Choose photos")}</button></div><p className="help">{t("Photos help carriers give you a more accurate price.")}</p></section>}{step === 2 && <AddressStep label={t("Where should it be picked up?")} value="IKEA Zagreb" kind="pickup" expanded={expanded === "pickup"} onExpand={() => setExpanded(expanded === "pickup" ? "" : "pickup")} />}{step === 3 && <AddressStep label={t("Where is it going?")} value="Trešnjevka, Zagreb" kind="delivery" expanded={expanded === "delivery"} onExpand={() => setExpanded(expanded === "delivery" ? "" : "delivery")} />}{step === 4 && <section><p className="eyebrow">{t("Make it work for you")}</p><h1>{t("When should it be moved?")}</h1><div className="timing">{["As soon as possible", "Choose a date", "I’m flexible"].map(item => <button className={timing === item ? "selected" : ""} key={item} onClick={() => setTiming(item)}><b>{t(item)}</b>{item === "I’m flexible" && <span>{t("Flexible jobs can often receive cheaper offers because carriers can combine them with existing routes.")}</span>}</button>)}</div>{timing === "Choose a date" && <label>{t("Preferred date")}<input type="date" /></label>}</section>}{step === 5 && <section><p className="eyebrow">{t("Last details")}</p><h1>{t("Anything else carriers should know?")}</h1><div className="tags">{["Needs two people", "Heavy item", "Already packed", "Store pickup", "Fragile"].map(tag => <button key={tag}>{t(tag)}</button>)}</div><label><textarea className="large-textarea" placeholder={t("Add a note (optional)")} /></label></section>}{step === 6 && <section className="review-request"><p className="eyebrow">{t("One more look")}</p><h1>{t("Ready to publish?")}</h1><article><ItemImage /><div><span>{t("Furniture")}</span><h2>{t("Bed slats")}</h2><p>IKEA Zagreb <i>→</i> Trešnjevka</p><small>12 km · {t(timing)} · {t("No loading help required")}</small></div><button>{t("Edit")}</button></article></section>}</main><footer><button className="button ghost" disabled={step === 0} onClick={() => setStep(Math.max(0, step - 1))}>{t("Back")}</button><button className="button dark" onClick={next}>{t(step === 6 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>; }
+export function CreateRequest() {
+  const { t } = useLanguage();
+  const nav = useNavigate();
+  const [step, setStep] = useState(0);
+  const [category, setCategory] = useState("Furniture");
+  const [itemName, setItemName] = useState("");
+  const [timing, setTiming] = useState("I’m flexible");
+  const [expanded, setExpanded] = useState("");
+  const [pickupLocation, setPickupLocation] = useState<AddressLocation | null>(null);
+  const [deliveryLocation, setDeliveryLocation] = useState<AddressLocation | null>(null);
+  const [dimensions, setDimensions] = useState({ length: "", width: "", weight: "" });
+  const [photos, setPhotos] = useState<PendingRequestImage[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<Array<PendingRequestImage & { url: string }>>([]);
+  const [photoError, setPhotoError] = useState("");
+  const photoInput = useRef<HTMLInputElement | null>(null);
+  const dimensionsComplete = Object.values(dimensions).every(value => Number(value) > 0);
+  const locationForCurrentStep = step === 2 ? pickupLocation : step === 3 ? deliveryLocation : true;
+  const next = async () => {
+    if (!locationForCurrentStep) return;
+    if (step !== WIZARD_STEPS.length - 1) return setStep(step + 1);
+    const token = window.localStorage.getItem("auth_token") || "";
+    if (!token) return nav("/auth");
+    await syncPendingRequestImages(token).catch(() => false);
+    nav("/customer");
+  };
 
-function AddressStep({ label, value, kind, expanded, onExpand }: { label: string; value: string; kind: "pickup" | "delivery"; expanded: boolean; onExpand: () => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; const kindLabel = t(kind); return <section><p className="eyebrow">{t(isPickup ? "First stop" : "Last stop")}</p><h1>{label}</h1><label className="address-input">{t(isPickup ? "Pickup location" : "Delivery location")}<input defaultValue={value} /></label>{isPickup ? <div className="map"><span>IKEA Zagreb</span><i>{t("Pickup")}</i></div> : <div className="route-summary"><span>IKEA Zagreb</span><RouteLine /><span>Trešnjevka</span><b>12 km</b></div>}<button className="expand" onClick={onExpand}>{expanded ? t("Hide {kind} details", { kind: kindLabel }) : t("Add {kind} details", { kind: kindLabel })}</button>{expanded && <div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div>}</section>; }
+  useEffect(() => {
+    void loadPendingRequestImages().then(setPhotos).catch(() => setPhotoError(t("Unable to load saved photos")));
+  }, [t]);
+
+  useEffect(() => {
+    const previews = photos.map(photo => ({ ...photo, url: URL.createObjectURL(photo.blob) }));
+    setPhotoPreviews(previews);
+    return () => previews.forEach(photo => URL.revokeObjectURL(photo.url));
+  }, [photos]);
+
+  const addPhotos = async (files: File[]) => {
+    setPhotoError("");
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+    const valid = files.filter(file => allowedTypes.has(file.type) && file.size > 0 && file.size <= MAX_REQUEST_IMAGE_BYTES);
+    if (valid.length !== files.length) setPhotoError(t("Choose image files up to 10 MB each"));
+    const available = MAX_REQUEST_IMAGES - photos.length;
+    if (valid.length > available) setPhotoError(t("You can add up to 3 photos"));
+    const nextPhotos = [...photos, ...pendingImagesFromFiles(valid.slice(0, available))];
+    setPhotos(nextPhotos);
+    try {
+      await savePendingRequestImages(nextPhotos);
+    } catch {
+      setPhotoError(t("Unable to save photos on this device"));
+    }
+  };
+
+  const choosePhotos = (event: ChangeEvent<HTMLInputElement>) => {
+    void addPhotos(Array.from(event.target.files || []));
+    event.target.value = "";
+  };
+
+  const dropPhotos = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    void addPhotos(Array.from(event.dataTransfer.files));
+  };
+
+  const removePhoto = async (id: string) => {
+    const nextPhotos = photos.filter(photo => photo.id !== id);
+    setPhotos(nextPhotos);
+    setPhotoError("");
+    try {
+      await savePendingRequestImages(nextPhotos);
+    } catch {
+      setPhotoError(t("Unable to save photos on this device"));
+    }
+  };
+
+  return <div className="wizard"><header><Mark /><div className="wizard-header-actions"><span>{step + 1} / {WIZARD_STEPS.length}</span><LanguagePicker /><Link to="/">×</Link></div></header><div className="wizard-progress"><b style={{ width: `${((step + 1) / WIZARD_STEPS.length) * 100}%` }} />{WIZARD_STEPS.map((label, index) => <span className={index === step ? "current" : ""} key={label}>{t(label)}</span>)}</div><main>
+    {step === 0 && <section><h1>{t("What are you moving?")}</h1><div className="choices">{CATEGORIES.map(item => <button className={category === item ? "selected" : ""} key={item} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><label>{t("Item name")}<input value={itemName} onChange={event => setItemName(event.target.value)} placeholder={t("Bed slats")} required /></label><div className="inline-inputs"><label>{t("Length")}<input type="number" min="0.01" step="any" value={dimensions.length} onChange={event => setDimensions({ ...dimensions, length: event.target.value })} placeholder="cm" required /></label><label>{t("Width")}<input type="number" min="0.01" step="any" value={dimensions.width} onChange={event => setDimensions({ ...dimensions, width: event.target.value })} placeholder="cm" required /></label><label>{t("Weight")}<input type="number" min="0.01" step="any" value={dimensions.weight} onChange={event => setDimensions({ ...dimensions, weight: event.target.value })} placeholder="kg" required /></label></div><label><span className="field-label">{t("Description")} <em>({t("Optional")})</em></span><textarea placeholder={t("Anything carriers should know about the item?")} /></label></section>}
+    {step === 1 && <section className="visual-step"><h1>{t("Show carriers what they’re moving.")}</h1><div className={`drop ${photoPreviews.length ? "has-photos" : ""}`} onDragOver={event => event.preventDefault()} onDrop={dropPhotos}><input ref={photoInput} className="photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={choosePhotos} />{photoPreviews.length > 0 && <div className="photo-previews">{photoPreviews.map((photo, index) => <figure key={photo.id}><img src={photo.url} alt={`${t("Selected photo")} ${index + 1}`} /><button type="button" aria-label={t("Remove photo")} onClick={() => void removePhoto(photo.id)}>×</button></figure>)}</div>}<span>{t("Choose photos from your device or drop them here")}</span><button type="button" className="button dark short" disabled={photos.length >= MAX_REQUEST_IMAGES} onClick={() => photoInput.current?.click()}>{t("Choose photos")}</button></div>{photoError && <p className="field-error photo-error" role="alert">{photoError}</p>}<p className="help">{t("Photos help carriers give you a more accurate price.")} {t("Up to 3 photos.")}</p></section>}
+    {step === 2 && <AddressStep label={t("Where should it be picked up?")} kind="pickup" location={pickupLocation} onLocationChange={setPickupLocation} expanded={expanded === "pickup"} onExpand={() => setExpanded(expanded === "pickup" ? "" : "pickup")} />}
+    {step === 3 && <AddressStep label={t("Where is it going?")} kind="delivery" location={deliveryLocation} onLocationChange={setDeliveryLocation} expanded={expanded === "delivery"} onExpand={() => setExpanded(expanded === "delivery" ? "" : "delivery")} />}
+    {step === 4 && <section><p className="eyebrow">{t("Make it work for you")}</p><h1>{t("When should it be moved?")}</h1><div className="timing">{["As soon as possible", "Choose a date", "I’m flexible"].map(item => <button className={timing === item ? "selected" : ""} key={item} onClick={() => setTiming(item)}><b>{t(item)}</b>{item === "I’m flexible" && <span>{t("Flexible jobs can often receive cheaper offers because carriers can combine them with existing routes.")}</span>}</button>)}</div>{timing === "Choose a date" && <label>{t("Preferred date")}<input type="date" /></label>}</section>}
+    {step === 5 && <section className="review-request"><p className="eyebrow">{t("One more look")}</p><h1>{t("Ready to publish?")}</h1><article><ItemImage /><div><span>{t("Furniture")}</span><h2>{itemName}</h2><p>{pickupLocation?.formatted || t("Pickup location")} <i>→</i> {deliveryLocation?.formatted || t("Delivery location")}</p><small>{t(timing)} · {t("No loading help required")}</small></div><button>{t("Edit")}</button></article></section>}
+  </main><footer><button className="button ghost" disabled={step === 0} onClick={() => setStep(Math.max(0, step - 1))}>{t("Back")}</button><button className="button dark" disabled={(step === 0 && (!dimensionsComplete || !itemName.trim())) || !locationForCurrentStep} onClick={() => void next()}>{t(step === WIZARD_STEPS.length - 1 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>;
+}
+
+function AddressStep({ label, kind, location, onLocationChange, expanded, onExpand }: { label: string; kind: "pickup" | "delivery"; location: AddressLocation | null; onLocationChange: (location: AddressLocation | null) => void; expanded: boolean; onExpand: () => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; const kindLabel = t(kind); return <section>{!isPickup && <p className="eyebrow">{t("Last stop")}</p>}<h1>{label}</h1><AddressPicker label={t(isPickup ? "Pickup location" : "Delivery location")} placeholder={t("Search for an address, business or landmark")} value={location} onChange={onLocationChange} precisionHint={t(isPickup ? "Move the pin to the exact pickup point." : "Move the pin to the exact delivery point.")} /><button className="expand" onClick={onExpand}>{expanded ? t("Hide {kind} details", { kind: kindLabel }) : t("Add {kind} details", { kind: kindLabel })}</button>{expanded && <div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div>}</section>; }
 export function Registration() {
   const { language, t } = useLanguage();
   const nav = useNavigate();
@@ -251,6 +360,8 @@ export function Registration() {
   const [pendingPhoneNumber, setPendingPhoneNumber] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [message, setMessage] = useState("");
+  const [googleRegistrationToken, setGoogleRegistrationToken] = useState("");
+  const emailResendCooldown = useEmailResendCooldown(Boolean(verificationEmail));
   const confirmationResult = useRef<ConfirmationResult | null>(null);
   const recaptchaVerifier = useRef<RecaptchaVerifier | null>(null);
   const firebaseAuth = useRef<Auth | null>(null);
@@ -263,12 +374,18 @@ export function Registration() {
   useEffect(() => {
     setStage(verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login");
     if (verificationEmail) setEmail(verificationEmail);
+    setGoogleRegistrationToken("");
     setAuthError("");
     setMessage("");
   }, [requestedMode, verificationEmail]);
 
+  const syncPhotosAndNavigate = async (token: string, user: AuthenticatedUser) => {
+    await syncPendingRequestImages(token).catch(() => false);
+    nav(user.role === "transporter" ? "/carrier" : "/customer");
+  };
+
   const validatePasswords = () => {
-    if (stage !== "profile") return true;
+    if (stage !== "profile" || googleRegistrationToken) return true;
     const nextPasswordError = password.length < 8 ? t("Password must be at least 8 characters") : "";
     const nextConfirmationError = password !== passwordConfirmation ? t("Passwords do not match") : "";
     setPasswordError(nextPasswordError);
@@ -279,6 +396,11 @@ export function Registration() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!validatePasswords()) return;
+    if (stage === "profile" && googleRegistrationToken) {
+      setAuthError("");
+      setStage("phone");
+      return;
+    }
     setSubmitting(true);
     setAuthError("");
     try {
@@ -292,7 +414,7 @@ export function Registration() {
         if (payload.code === "EMAIL_NOT_VERIFIED") {
           await fetch("/api/auth/email/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
           setStage("email-code");
-          setMessage(t("We sent a new six-digit code to your email."));
+          emailResendCooldown.start();
           return;
         }
         throw new Error(payload.error || t(stage === "profile" ? "Unable to create account" : "Unable to sign in"));
@@ -300,7 +422,7 @@ export function Registration() {
       if (stage === "profile") {
         setEmail(payload.email || email);
         setStage("email-code");
-        setMessage(t("We sent a six-digit code to your email."));
+        emailResendCooldown.start();
         return;
       }
       if (!payload.token || !payload.user) throw new Error(t("Unable to sign in"));
@@ -310,7 +432,7 @@ export function Registration() {
         setStage("phone");
         return;
       }
-      nav(payload.user.role === "transporter" ? "/carrier" : "/customer");
+      await syncPhotosAndNavigate(payload.token, payload.user);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : t(stage === "profile" ? "Unable to create account" : "Unable to sign in"));
     } finally {
@@ -320,9 +442,31 @@ export function Registration() {
 
   const authenticated = (token: string, user: AuthenticatedUser) => {
     window.localStorage.setItem("auth_token", token);
+    setGoogleRegistrationToken("");
     setRole(user.role);
-    if (user.phoneVerified) nav(user.role === "transporter" ? "/carrier" : "/customer");
+    if (user.phoneVerified) void syncPhotosAndNavigate(token, user);
     else setStage("phone");
+  };
+
+  const beginGoogleRegistration = ({ token, profile }: GoogleRegistration) => {
+    window.localStorage.removeItem("auth_token");
+    setGoogleRegistrationToken(token);
+    setEmail(profile.email);
+    setFirstName(profile.firstName);
+    setLastName(profile.lastName);
+    setPassword("");
+    setPasswordConfirmation("");
+    setAuthError("");
+    setStage("role");
+  };
+
+  const backToLogin = () => {
+    setGoogleRegistrationToken("");
+    setFirstName("");
+    setLastName("");
+    setEmail("");
+    setStage("login");
+    nav("/auth");
   };
 
   const verifyEmailCode = async (event: FormEvent<HTMLFormElement>) => {
@@ -341,12 +485,13 @@ export function Registration() {
   };
 
   const resendEmailCode = async () => {
+    if (submitting || emailResendCooldown.remaining > 0) return;
     setSubmitting(true); setAuthError(""); setMessage("");
     try {
       const response = await fetch("/api/auth/email/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
       const payload = await response.json() as { message?: string; error?: string };
       if (!response.ok) throw new Error(payload.error || t("Unable to send verification email"));
-      setMessage(t("A new six-digit code was sent."));
+      emailResendCooldown.start();
     } catch (error) { setAuthError(error instanceof Error ? error.message : t("Unable to send verification email")); }
     finally { setSubmitting(false); }
   };
@@ -355,14 +500,14 @@ export function Registration() {
     event.preventDefault();
     setSubmitting(true); setPhoneError(""); setAuthError(""); setMessage("");
     try {
-      const sessionToken = window.localStorage.getItem("auth_token") || "";
+      const authorizationToken = googleRegistrationToken || window.localStorage.getItem("auth_token") || "";
       const configResponse = await fetch("/api/auth/config");
       const configPayload = await configResponse.json() as AuthConfig;
       if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error(t("Phone verification is not configured"));
       const phoneNumber = normalizedPhoneNumber(country, localNumber);
       if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
 
-      const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` }, body: JSON.stringify({ phoneNumber }) });
+      const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ phoneNumber }) });
       const validationPayload = await validationResponse.json() as { error?: string };
       if (!validationResponse.ok) throw new Error(validationPayload.error || t("Unable to send phone verification code"));
 
@@ -376,7 +521,7 @@ export function Registration() {
       confirmationResult.current = await signInWithPhoneNumber(auth, phoneNumber, verifier);
       setPendingPhoneNumber(phoneNumber);
       setStage("phone-code");
-      setMessage(configPayload.firebase.testMode ? t("Use the six-digit test code configured for this phone number in Firebase.") : t("We sent a six-digit code to your phone."));
+      setMessage(configPayload.firebase.testMode ? "" : t("We sent a six-digit code to your phone."));
     } catch (error) {
       setAuthError(error instanceof Error && !('code' in error) ? error.message : firebasePhoneError(error, t));
       confirmationResult.current = null;
@@ -395,23 +540,27 @@ export function Registration() {
     try {
       const credential = await confirmationResult.current.confirm(phoneCode);
       const firebaseIdToken = await credential.user.getIdToken();
-      const response = await fetch("/api/auth/phone/verify", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${window.localStorage.getItem("auth_token") || ""}` }, body: JSON.stringify({ firebaseIdToken }) });
-      const payload = await response.json() as { user?: AuthenticatedUser; error?: string };
+      const authorizationToken = googleRegistrationToken || window.localStorage.getItem("auth_token") || "";
+      const response = await fetch("/api/auth/phone/verify", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ firebaseIdToken, ...(googleRegistrationToken ? { role, firstName, lastName } : {}) }) });
+      const payload = await response.json() as { token?: string; user?: AuthenticatedUser; error?: string };
       if (!response.ok || !payload.user) throw new Error(payload.error || t("Unable to verify phone number"));
+      const sessionToken = payload.token || window.localStorage.getItem("auth_token") || "";
+      if (payload.token) window.localStorage.setItem("auth_token", payload.token);
       if (firebaseAuth.current) await signOut(firebaseAuth.current);
       confirmationResult.current = null;
-      nav(payload.user.role === "transporter" ? "/carrier" : "/customer");
+      setGoogleRegistrationToken("");
+      await syncPhotosAndNavigate(sessionToken, payload.user);
     } catch (error) { setAuthError(error instanceof Error && !('code' in error) ? error.message : firebasePhoneError(error, t)); }
     finally { setSubmitting(false); }
   };
 
   return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>
-    {stage === "login" && <><GoogleSignInButton onAuthenticated={authenticated} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" required /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to="/auth?mode=register">{t("Create one here")}</Link></p></>}
-    {stage === "role" && <><p className="eyebrow">{t("Create your account")}</p><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setStage("profile")}>{t("Continue")} <Arrow /></button><p className="auth-signup-prompt">{t("Already have an account?")} <Link to="/auth">{t("Sign in here")}</Link></p></>}
-    {stage === "profile" && <><p className="eyebrow">{t(role === "transporter" ? "Transporter account" : "Requester account")}</p><h1>{t("Create your account")}</h1><form className="auth-form" onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} autoComplete="given-name" required /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} autoComplete="family-name" required /></label></div><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordError)} required />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordConfirmationError)} required />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}>← {t("Back")}</button></>}
-    {stage === "email-code" && <><p className="eyebrow">{t("Confirm your email")}</p><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting}>{t("Send a new code")}</button></>}
-    {stage === "phone" && <><p className="eyebrow">{t("One quick check")}</p><h1>{t("Verify your phone.")}</h1><div className="security-note"><b>{t("Why we verify your phone")}</b><p>{t("Once a transport is agreed, VanScout shares phone contacts between both people. A verified number makes coordination easier and helps show that each person is genuine, adding an important layer of safety.")}</p></div><form onSubmit={sendPhoneCode}><PhoneNumberField country={country} localNumber={localNumber} onCountryChange={value => { setCountry(value); setLocalNumber(""); setPhoneError(""); }} onNumberChange={value => { setLocalNumber(value); setPhoneError(""); }} error={phoneError} />{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full auth-create-button" type="submit" disabled={submitting}>{t("Send verification code")} <Arrow /></button></form></>}
-    {stage === "phone-code" && <><p className="eyebrow">{t("Confirm your phone")}</p><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsePhoneNumberFromString(pendingPhoneNumber)?.formatInternational() || pendingPhoneNumber}</strong>.</p><form onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); setPendingPhoneNumber(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
+    {stage === "login" && <><h1>{t("Login or create new account")}</h1><GoogleSignInButton onAuthenticated={authenticated} onRegistrationRequired={beginGoogleRegistration} /><div className="or">{t("or")}</div><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" required /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to="/auth?mode=register">{t("Create one here")}</Link></p></>}
+    {stage === "role" && <><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setStage("profile")}>{t("Continue")} <Arrow /></button><button className="quiet-link auth-back" type="button" onClick={backToLogin}>← {t("Back")}</button></>}
+    {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" required /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" required /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordError)} required />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordConfirmationError)} required />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}>← {t("Back")}</button></>}
+    {stage === "email-code" && <><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button></>}
+    {stage === "phone" && <><h1>{t("Verify your phone.")}</h1><div className="security-note"><b>{t("Why we verify your phone")}</b><p>{t("Once a transport is agreed, VanScout shares phone contacts between both people. A verified number makes coordination easier and helps show that each person is genuine, adding an important layer of safety.")}</p></div><form onSubmit={sendPhoneCode}><PhoneNumberField country={country} localNumber={localNumber} onCountryChange={value => { setCountry(value); setLocalNumber(""); setPhoneError(""); }} onNumberChange={value => { setLocalNumber(value); setPhoneError(""); }} error={phoneError} />{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full auth-create-button" type="submit" disabled={submitting}>{t("Send verification code")} <Arrow /></button></form></>}
+    {stage === "phone-code" && <><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsePhoneNumberFromString(pendingPhoneNumber)?.formatInternational() || pendingPhoneNumber}</strong>.</p><form onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); setPendingPhoneNumber(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
     <div id="firebase-phone-recaptcha" />
   </main></div>;
 }
@@ -423,8 +572,10 @@ export function CheckEmail() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const emailResendCooldown = useEmailResendCooldown(true);
 
   const resend = async () => {
+    if (submitting || emailResendCooldown.remaining > 0) return;
     setSubmitting(true);
     setMessage("");
     setError("");
@@ -437,6 +588,7 @@ export function CheckEmail() {
       const payload = await response.json() as { message?: string; error?: string };
       if (!response.ok) throw new Error(payload.error || t("Unable to send verification email"));
       setMessage(payload.message || t("Verification email sent"));
+      emailResendCooldown.start();
     } catch (resendError) {
       setError(resendError instanceof Error ? resendError.message : t("Unable to send verification email"));
     } finally {
@@ -444,7 +596,7 @@ export function CheckEmail() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Confirm your email")}</p><h1>{t("Check your email")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<Link className="button dark full auth-create-button" to={`/auth?verifyEmail=${encodeURIComponent(email)}`}>{t("Continue verification")}</Link><button className="quiet-link center" type="button" onClick={() => void resend()} disabled={submitting}>{t("Send a new code")}</button><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Check your email")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<Link className="button dark full auth-create-button" to={`/auth?verifyEmail=${encodeURIComponent(email)}`}>{t("Continue verification")}</Link><button className="quiet-link center" type="button" onClick={() => void resend()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
 }
 
 export function VerifyEmail() {
@@ -468,7 +620,7 @@ export function VerifyEmail() {
     }).catch(() => setStatus("error"));
   }, [token]);
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p className="eyebrow">{t("Confirm your email")}</p><h1>{status === "loading" ? t("Confirming your email…") : status === "success" ? t("Email verified") : t("Unable to verify your email")}</h1><p>{status === "success" ? t("Your email has been verified. You can now sign in.") : status === "error" ? t("This verification link is invalid or expired") : t("Please wait while we confirm your email.")}</p><Link className="button dark full auth-create-button" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{status === "loading" ? t("Confirming your email…") : status === "success" ? t("Email verified") : t("Unable to verify your email")}</h1><p>{status === "success" ? t("Your email has been verified. You can now sign in.") : status === "error" ? t("This verification link is invalid or expired") : t("Please wait while we confirm your email.")}</p><Link className="button dark full auth-create-button" to="/auth">{t("Back to sign in")}</Link></main></div>;
 }
 
 export function ForgotPassword() {
@@ -499,7 +651,7 @@ export function ForgotPassword() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><p>{t("Enter your email to reset your password")}</p><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Reset password")}</h1><form className="auth-form" onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth">← {t("Back")}</Link></main></div>;
 }
 
 export function ResetPassword() {

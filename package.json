@@ -25,6 +25,7 @@
     "google-auth-library": "^10.5.0",
     "jose": "^6.1.0",
     "libphonenumber-js": "^1.13.13",
+    "maplibre-gl": "^5.24.0",
     "next": "^16.2.12",
     "nodemailer": "^10.0.4",
     "react": "^19.2.8",

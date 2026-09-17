@@ -1,25 +1,42 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
-import { verifyUserPhone } from "@/lib/database";
+import { createGoogleUserWithPhone, verifyUserPhone } from "@/lib/database";
 import { verifiedFirebasePhoneNumber } from "@/lib/firebase-token";
+import { bearerToken, createSessionToken, verifyGoogleRegistrationToken } from "@/lib/session";
 
 const bodySchema = z.object({
   firebaseIdToken: z.string().min(100),
+  role: z.enum(["requester", "transporter"]).optional(),
+  firstName: z.string().trim().min(1).max(100).optional(),
+  lastName: z.string().trim().min(1).max(100).optional(),
 });
 
 export async function POST(request: Request) {
   const authenticated = await authenticatedUser(request);
-  if (!authenticated) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const body = bodySchema.parse(await request.json());
+    if (authenticated) {
+      const phoneNumber = await verifiedFirebasePhoneNumber(body.firebaseIdToken);
+      const user = await verifyUserPhone(authenticated.id, phoneNumber);
+      return NextResponse.json({ user });
+    }
+
+    const pendingToken = bearerToken(request);
+    if (!pendingToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const identity = await verifyGoogleRegistrationToken(pendingToken);
+    if (!body.role || !body.firstName || !body.lastName) {
+      return NextResponse.json({ error: "Name and account type are required" }, { status: 400 });
+    }
     const phoneNumber = await verifiedFirebasePhoneNumber(body.firebaseIdToken);
-    const user = await verifyUserPhone(authenticated.id, phoneNumber);
-    return NextResponse.json({ user });
+    const user = await createGoogleUserWithPhone(identity, body.role, body.firstName, body.lastName, phoneNumber);
+    const token = await createSessionToken(user);
+    return NextResponse.json({ token, user });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Phone verification token is required" }, { status: 400 });
     if (error instanceof Error && error.message.includes("unique")) return NextResponse.json({ error: "This phone number is already used by another account" }, { status: 409 });
+    if (error instanceof Error && error.message.includes("Google registration")) return NextResponse.json({ error: error.message }, { status: 401 });
     return NextResponse.json({ error: "Phone verification is invalid or expired" }, { status: 401 });
   }
 }

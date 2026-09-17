@@ -85,6 +85,18 @@ async function ensureSchema() {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_request_draft_images (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          filename TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          image_data BYTEA NOT NULL,
+          position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 2),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (user_id, position)
+        )
+      `;
     }).catch(error => {
       schemaReady = null;
       throw error;
@@ -109,6 +121,20 @@ function toUser(row: Record<string, unknown>): AppUser {
     phoneNumber: typeof row.phone_number === "string" ? row.phone_number : null,
     phoneVerified: row.phone_verified_at instanceof Date || typeof row.phone_verified_at === "string",
   };
+}
+
+export async function findUserByGoogleIdentity(identity: GoogleIdentity): Promise<AppUser | null> {
+  await ensureSchema();
+  const sql = database();
+  const rows = await sql`
+    SELECT id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    FROM vanscout_users
+    WHERE google_subject = ${identity.subject}
+       OR LOWER(email) = LOWER(${identity.email})
+    ORDER BY CASE WHEN google_subject = ${identity.subject} THEN 0 ELSE 1 END
+    LIMIT 1
+  `;
+  return rows[0] ? toUser(rows[0] as Record<string, unknown>) : null;
 }
 
 export async function upsertGoogleUser(identity: GoogleIdentity, role?: AccountRole): Promise<AppUser> {
@@ -154,6 +180,19 @@ export async function upsertGoogleUser(identity: GoogleIdentity, role?: AccountR
           updated_at = NOW()
         RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
       `;
+  return toUser(rows[0] as Record<string, unknown>);
+}
+
+export async function createGoogleUserWithPhone(identity: GoogleIdentity, role: AccountRole, firstName: string, lastName: string, phoneNumber: string): Promise<AppUser> {
+  await ensureSchema();
+  const sql = database();
+  const normalizedFirstName = firstName.trim();
+  const normalizedLastName = lastName.trim();
+  const rows = await sql`
+    INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role)
+    VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role})
+    RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+  `;
   return toUser(rows[0] as Record<string, unknown>);
 }
 
@@ -302,4 +341,17 @@ export async function resetUserPassword(tokenHash: string, passwordHash: string)
   `;
   await sql`DELETE FROM vanscout_password_resets WHERE token_hash = ${tokenHash}`;
   return true;
+}
+
+export async function replaceRequestDraftImages(userId: string, images: Array<{ name: string; type: string; bytes: Uint8Array }>) {
+  await ensureSchema();
+  const sql = database();
+  await sql`DELETE FROM vanscout_request_draft_images WHERE user_id = ${userId}`;
+  for (const [position, image] of images.slice(0, 3).entries()) {
+    const encoded = Buffer.from(image.bytes).toString("base64");
+    await sql`
+      INSERT INTO vanscout_request_draft_images (id, user_id, filename, content_type, image_data, position)
+      VALUES (${randomUUID()}, ${userId}, ${image.name}, ${image.type}, decode(${encoded}, 'base64'), ${position})
+    `;
+  }
 }
