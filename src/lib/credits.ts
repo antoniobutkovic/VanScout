@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sqlClient } from "./database";
-import { isStripeConfigured } from "./stripe";
+import { isStripeConfigured, stripeClient } from "./stripe";
 import type { CreditAccount, CreditTransaction } from "./marketplace-types";
 
 function iso(value: unknown) {
@@ -114,3 +114,52 @@ export async function completeCreditPurchase(input: {
   return rows[0] ? { carrierId: String(rows[0].carrier_id), balanceCents: Number(rows[0].balance_cents) } : null;
 }
 
+/**
+ * Reconcile paid Checkout Sessions when a webhook was delayed or could not
+ * reach the app (for example, a local URL or an SSO-protected preview URL).
+ * The webhook remains the primary path; this is an idempotent safety net for
+ * the signed-in carrier returning from Stripe.
+ */
+export async function reconcilePendingCreditPurchases(carrierId: string) {
+  const stripe = stripeClient();
+  if (!stripe) return;
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const purchases = await sql`
+    SELECT id, amount_cents, currency, stripe_checkout_session_id
+    FROM vanscout_credit_purchases
+    WHERE carrier_id = ${carrierId}
+      AND status = 'pending'
+      AND stripe_checkout_session_id IS NOT NULL
+    ORDER BY created_at ASC
+    LIMIT 20
+  `;
+
+  for (const raw of purchases) {
+    const purchase = raw as Record<string, unknown>;
+    const purchaseId = String(purchase.id);
+    const sessionId = String(purchase.stripe_checkout_session_id);
+    try {
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const sessionPurchaseId = session.metadata?.purchaseId || session.client_reference_id;
+      if (
+        sessionPurchaseId !== purchaseId
+        || session.payment_status !== "paid"
+        || session.amount_total !== Number(purchase.amount_cents)
+        || session.currency?.toLowerCase() !== String(purchase.currency).toLowerCase()
+      ) continue;
+
+      await completeCreditPurchase({
+        purchaseId,
+        sessionId,
+        paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id || null,
+        amountCents: session.amount_total,
+        currency: session.currency || "eur",
+      });
+    } catch (error) {
+      // A single unavailable Stripe session must not prevent the balance from
+      // loading. Stripe/webhook retries can reconcile it later.
+      console.error("Unable to reconcile Stripe credit purchase", { purchaseId, error });
+    }
+  }
+}
