@@ -152,6 +152,13 @@ async function ensureSchema() {
           UNIQUE (transport_request_id, carrier_id)
         )
       `;
+      // Keep databases created by earlier marketplace versions compatible with
+      // the agreement and credits flows. `CREATE TABLE IF NOT EXISTS` does not
+      // add columns to an existing table, so apply these additive changes
+      // idempotently before any marketplace query runs.
+      await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS carrier_agreed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS commission_cents INTEGER NOT NULL DEFAULT 0 CHECK (commission_cents >= 0)`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_transport_idx ON vanscout_transport_offers (transport_request_id, created_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_carrier_idx ON vanscout_transport_offers (carrier_id, created_at DESC)`;
       // Older databases may have been created before the composite foreign key
