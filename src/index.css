@@ -292,6 +292,7 @@ textarea { min-height: 105px; resize: vertical; }
 .password-toggle:focus-visible { outline: none; color: var(--clay); box-shadow: 0 0 0 2px rgba(53,74,46,.16); }
 .field-hint { display: block; margin: 4px 0 0; color: var(--muted); font-size: 11px; font-weight: 500; line-height: 1.35; }
 .field-error { margin: 2px 0 0; color: var(--red); font-size: 11px; font-weight: 600; line-height: 1.35; }
+.wizard-step-error { margin: 18px 0 0; }
 .auth input[aria-invalid="true"] { border-color: var(--red); }
 .auth-verification-link { display: block; margin-top: 14px; color: var(--moss); font-size: 12px; font-weight: 700; }
 .auth-verification-link:hover { color: var(--clay); }

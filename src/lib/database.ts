@@ -149,12 +149,17 @@ async function ensureSchema() {
           commission_cents INTEGER NOT NULL DEFAULT 0 CHECK (commission_cents >= 0),
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (transport_request_id, carrier_id),
-          UNIQUE (id, transport_request_id)
+          UNIQUE (transport_request_id, carrier_id)
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_transport_idx ON vanscout_transport_offers (transport_request_id, created_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_carrier_idx ON vanscout_transport_offers (carrier_id, created_at DESC)`;
+      // Older databases may have been created before the composite foreign key
+      // was introduced. `CREATE TABLE IF NOT EXISTS` does not update an
+      // existing table, so make the referenced key available before creating
+      // the selections table. `id` is already unique, making this index safe
+      // to add to both old and fresh databases.
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS vanscout_transport_offers_id_transport_idx ON vanscout_transport_offers (id, transport_request_id)`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_transport_selections (
           transport_request_id TEXT PRIMARY KEY REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,

@@ -26,8 +26,10 @@ export async function POST(request: Request) {
     const token = await createSessionToken(user);
     return NextResponse.json({ token, user });
   } catch (error) {
-    const message = error instanceof z.ZodError ? "Invalid Google sign-in request" : error instanceof Error ? error.message : "Google sign-in failed";
-    const status = message.includes("not configured") ? 503 : 401;
+    if (error instanceof z.ZodError) return NextResponse.json({ error: "Invalid Google sign-in request" }, { status: 400 });
+    console.error("Google sign-in failed", error);
+    const status = error instanceof Error && error.message.includes("not configured") ? 503 : 401;
+    const message = status === 503 ? "Google sign-in is not configured" : "Google sign-in failed. Please try again.";
     return NextResponse.json({ error: message }, { status });
   }
 }
