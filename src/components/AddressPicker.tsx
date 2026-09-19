@@ -7,7 +7,7 @@ type AddressPickerProps = {
   placeholder: string;
   value: AddressLocation | null;
   onChange: (location: AddressLocation | null) => void;
-  precisionHint: string;
+  precisionHint?: string;
 };
 
 const ZAGREB: [number, number] = [15.9819, 45.8150];
@@ -27,7 +27,6 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
   const inputRef = useRef<HTMLInputElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
-  const markerRef = useRef<import("maplibre-gl").Marker | null>(null);
   const resolveCoordinatesRef = useRef<(latitude: number, longitude: number) => void>(() => undefined);
   const valueRef = useRef<AddressLocation | null>(value);
   valueRef.current = value;
@@ -71,9 +70,6 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
       const initialLocation = valueRef.current;
       const initialLongitude = initialLocation?.longitude ?? ZAGREB[0];
       const initialLatitude = initialLocation?.latitude ?? ZAGREB[1];
-      const markerElement = document.createElement("div");
-      markerElement.className = "address-picker-pin";
-      markerElement.setAttribute("aria-hidden", "true");
 
       map = new maplibregl.Map({
         container: mapContainerRef.current,
@@ -81,34 +77,29 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
         center: [initialLongitude, initialLatitude],
         zoom: initialLocation ? 16 : 11,
       });
-      const marker = new maplibregl.Marker({ element: markerElement, draggable: true })
-        .setLngLat([initialLongitude, initialLatitude])
-        .addTo(map);
-      marker.on("dragend", () => {
-        const coordinates = marker.getLngLat();
+      map.on("dragend", () => {
+        const coordinates = map?.getCenter();
+        if (!coordinates) return;
         resolveCoordinatesRef.current(coordinates.lat, coordinates.lng);
       });
       map.on("click", event => {
-        marker.setLngLat(event.lngLat);
+        map?.easeTo({ center: event.lngLat, duration: 300 });
         resolveCoordinatesRef.current(event.lngLat.lat, event.lngLat.lng);
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       mapRef.current = map;
-      markerRef.current = marker;
     });
 
     return () => {
       disposed = true;
-      markerRef.current = null;
       mapRef.current = null;
       map?.remove();
     };
   }, []);
 
   useEffect(() => {
-    if (!value || !mapRef.current || !markerRef.current) return;
+    if (!value || !mapRef.current) return;
     const coordinates: [number, number] = [value.longitude, value.latitude];
-    markerRef.current.setLngLat(coordinates);
     mapRef.current.flyTo({ center: coordinates, zoom: Math.max(mapRef.current.getZoom(), 16), essential: true, duration: 550 });
   }, [value?.latitude, value?.longitude]);
 
@@ -218,11 +209,11 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
     </div>
     <div className="address-picker-map-shell">
       <div ref={mapContainerRef} className="address-picker-map" aria-label={t("Map for selecting an exact location")} />
+      <span className="address-picker-pin" aria-hidden="true"><svg viewBox="0 0 40 50"><path d="M20 2C10.06 2 2 10.06 2 20c0 13.5 18 28 18 28s18-14.5 18-28C38 10.06 29.94 2 20 2Z" /><circle cx="20" cy="20" r="6" /></svg></span>
       {!selected && <div className="address-picker-map-prompt" aria-hidden="true"><b>{t("Choose the exact location")}</b><span>{t("Search for an address or select a point on the map.")}</span></div>}
       {isResolving && <div className="address-picker-map-loading" role="status">{t("Finding address…")}</div>}
     </div>
-    <p className="address-picker-hint">{precisionHint}</p>
-    {value && <div className="address-picker-confirmed" role="status"><span aria-hidden="true">✓</span><div><b>{t("Location selected")}</b><small>{value.formatted}</small></div></div>}
+    {precisionHint && <p className="address-picker-hint">{precisionHint}</p>}
     {error && <p className="field-error" role="alert">{error}</p>}
   </div>;
 }

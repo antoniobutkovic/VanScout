@@ -64,6 +64,10 @@ export async function savePendingRequestImages(images: PendingRequestImage[]) {
   }
 }
 
+export async function clearPendingRequestImages() {
+  await savePendingRequestImages([]);
+}
+
 export function pendingImagesFromFiles(files: File[]): PendingRequestImage[] {
   const createdAt = Date.now();
   return files.map((file, index) => ({
@@ -76,12 +80,13 @@ export function pendingImagesFromFiles(files: File[]): PendingRequestImage[] {
   }));
 }
 
-export async function syncPendingRequestImages(token: string): Promise<boolean> {
+export async function syncPendingRequestImages(token: string, transportId?: string): Promise<boolean> {
   if (!token) return false;
   const images = await loadPendingRequestImages();
   if (!images.length) return true;
 
   const form = new FormData();
+  if (transportId) form.set("transportId", transportId);
   images.forEach(image => {
     const file = new File([image.blob], image.name, { type: image.type, lastModified: image.lastModified });
     form.append("images", file);
@@ -92,6 +97,6 @@ export async function syncPendingRequestImages(token: string): Promise<boolean> 
     body: form,
   });
   if (!response.ok) return false;
-  await savePendingRequestImages([]);
+  await clearPendingRequestImages();
   return true;
 }

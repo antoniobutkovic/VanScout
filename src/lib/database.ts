@@ -48,15 +48,6 @@ async function ensureSchema() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `.then(async () => {
-      await sql`ALTER TABLE vanscout_users ALTER COLUMN google_subject DROP NOT NULL`;
-      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS password_hash TEXT`;
-      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`;
-      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS first_name TEXT`;
-      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS last_name TEXT`;
-      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS phone_number TEXT`;
-      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS vanscout_users_phone_number_unique ON vanscout_users (phone_number) WHERE phone_number IS NOT NULL`;
-      await sql`UPDATE vanscout_users SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE google_subject IS NOT NULL`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_email_verifications (
           token_hash TEXT PRIMARY KEY,
@@ -66,7 +57,6 @@ async function ensureSchema() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
-      await sql`ALTER TABLE vanscout_email_verifications ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_password_resets (
           token_hash TEXT PRIMARY KEY,
@@ -86,17 +76,138 @@ async function ensureSchema() {
         )
       `;
       await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_transport_requests (
+          id TEXT PRIMARY KEY,
+          requester_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          category TEXT NOT NULL,
+          item_name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          length_cm DOUBLE PRECISION NOT NULL CHECK (length_cm > 0),
+          width_cm DOUBLE PRECISION NOT NULL CHECK (width_cm > 0),
+          weight_kg DOUBLE PRECISION NOT NULL CHECK (weight_kg > 0),
+          pickup_formatted TEXT NOT NULL,
+          pickup_latitude DOUBLE PRECISION NOT NULL,
+          pickup_longitude DOUBLE PRECISION NOT NULL,
+          delivery_formatted TEXT NOT NULL,
+          delivery_latitude DOUBLE PRECISION NOT NULL,
+          delivery_longitude DOUBLE PRECISION NOT NULL,
+          timing TEXT NOT NULL,
+          preferred_date DATE,
+          preferred_date_to DATE,
+          status TEXT NOT NULL DEFAULT 'looking_for_carriers' CHECK (status IN ('looking_for_carriers', 'carrier_booked', 'completed')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_requests_requester_created_idx ON vanscout_transport_requests (requester_id, created_at DESC)`;
+      await sql`
         CREATE TABLE IF NOT EXISTS vanscout_request_draft_images (
           id TEXT PRIMARY KEY,
           user_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          transport_request_id TEXT REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,
+          filename TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          image_data BYTEA NOT NULL,
+          position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 2),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS vanscout_request_draft_images_draft_position_idx ON vanscout_request_draft_images (user_id, position) WHERE transport_request_id IS NULL`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS vanscout_request_images_transport_position_idx ON vanscout_request_draft_images (transport_request_id, position) WHERE transport_request_id IS NOT NULL`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_profiles (
+          carrier_id TEXT PRIMARY KEY REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          company_name TEXT NOT NULL DEFAULT '',
+          bio TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_profile_images (
+          id TEXT PRIMARY KEY,
+          carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
           filename TEXT NOT NULL,
           content_type TEXT NOT NULL,
           image_data BYTEA NOT NULL,
           position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 2),
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (user_id, position)
+          UNIQUE (carrier_id, position)
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_transport_offers (
+          id TEXT PRIMARY KEY,
+          transport_request_id TEXT NOT NULL REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,
+          carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          price_cents INTEGER NOT NULL CHECK (price_cents > 0),
+          available_date DATE NOT NULL,
+          message TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected')),
+          carrier_agreed_at TIMESTAMPTZ,
+          confirmed_at TIMESTAMPTZ,
+          commission_cents INTEGER NOT NULL DEFAULT 0 CHECK (commission_cents >= 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (transport_request_id, carrier_id),
+          UNIQUE (id, transport_request_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_transport_idx ON vanscout_transport_offers (transport_request_id, created_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_carrier_idx ON vanscout_transport_offers (carrier_id, created_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_transport_selections (
+          transport_request_id TEXT PRIMARY KEY REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,
+          offer_id TEXT NOT NULL UNIQUE,
+          selected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          FOREIGN KEY (offer_id, transport_request_id)
+            REFERENCES vanscout_transport_offers(id, transport_request_id) ON DELETE CASCADE
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_credit_accounts (
+          carrier_id TEXT PRIMARY KEY REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (balance_cents >= 0),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_credit_purchases (
+          id TEXT PRIMARY KEY,
+          carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+          currency TEXT NOT NULL DEFAULT 'eur' CHECK (currency = 'eur'),
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'expired')),
+          stripe_checkout_session_id TEXT UNIQUE,
+          stripe_payment_intent_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          paid_at TIMESTAMPTZ
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_credit_transactions (
+          id TEXT PRIMARY KEY,
+          carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          amount_cents INTEGER NOT NULL CHECK (amount_cents <> 0),
+          kind TEXT NOT NULL CHECK (kind IN ('purchase', 'commission', 'refund', 'adjustment')),
+          description TEXT NOT NULL,
+          offer_id TEXT UNIQUE REFERENCES vanscout_transport_offers(id) ON DELETE SET NULL,
+          credit_purchase_id TEXT UNIQUE REFERENCES vanscout_credit_purchases(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_credit_transactions_carrier_created_idx ON vanscout_credit_transactions (carrier_id, created_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_messages (
+          id TEXT PRIMARY KEY,
+          offer_id TEXT NOT NULL REFERENCES vanscout_transport_offers(id) ON DELETE CASCADE,
+          sender_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          body TEXT NOT NULL CHECK (LENGTH(body) BETWEEN 1 AND 2000),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_messages_offer_created_idx ON vanscout_messages (offer_id, created_at ASC)`;
     }).catch(error => {
       schemaReady = null;
       throw error;
@@ -343,15 +454,34 @@ export async function resetUserPassword(tokenHash: string, passwordHash: string)
   return true;
 }
 
-export async function replaceRequestDraftImages(userId: string, images: Array<{ name: string; type: string; bytes: Uint8Array }>) {
+export async function replaceRequestDraftImages(userId: string, images: Array<{ name: string; type: string; bytes: Uint8Array }>, transportRequestId?: string) {
   await ensureSchema();
   const sql = database();
-  await sql`DELETE FROM vanscout_request_draft_images WHERE user_id = ${userId}`;
+  if (transportRequestId) {
+    const owned = await sql`SELECT id FROM vanscout_transport_requests WHERE id = ${transportRequestId} AND requester_id = ${userId} LIMIT 1`;
+    if (!owned[0]) throw new Error("Transport request not found");
+    await sql`DELETE FROM vanscout_request_draft_images WHERE transport_request_id = ${transportRequestId}`;
+  } else {
+    await sql`DELETE FROM vanscout_request_draft_images WHERE user_id = ${userId} AND transport_request_id IS NULL`;
+  }
   for (const [position, image] of images.slice(0, 3).entries()) {
     const encoded = Buffer.from(image.bytes).toString("base64");
     await sql`
-      INSERT INTO vanscout_request_draft_images (id, user_id, filename, content_type, image_data, position)
-      VALUES (${randomUUID()}, ${userId}, ${image.name}, ${image.type}, decode(${encoded}, 'base64'), ${position})
+      INSERT INTO vanscout_request_draft_images (id, user_id, transport_request_id, filename, content_type, image_data, position)
+      VALUES (${randomUUID()}, ${userId}, ${transportRequestId || null}, ${image.name}, ${image.type}, decode(${encoded}, 'base64'), ${position})
     `;
   }
+}
+
+export async function getTransportRequestImage(transportRequestId: string, imageId: string) {
+  await ensureSchema();
+  const sql = database();
+  const rows = await sql`
+    SELECT content_type, image_data FROM vanscout_request_draft_images
+    WHERE id = ${imageId} AND transport_request_id = ${transportRequestId}
+    LIMIT 1
+  `;
+  if (!rows[0]) return null;
+  const data = rows[0].image_data;
+  return { contentType: String(rows[0].content_type), data: Buffer.isBuffer(data) ? data : Buffer.from(data as Uint8Array) };
 }

@@ -12,6 +12,7 @@ export async function POST(request: Request) {
 
   try {
     const form = await request.formData();
+    const transportId = String(form.get("transportId") || "").trim() || undefined;
     const images = form.getAll("images").filter((value): value is File => value instanceof File);
     if (!images.length || images.length > MAX_IMAGES) {
       return NextResponse.json({ error: "Choose between one and three images" }, { status: 400 });
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
       name: image.name.slice(0, 255) || "request-image",
       type: image.type,
       bytes: new Uint8Array(await image.arrayBuffer()),
-    }))));
+    }))), transportId);
     return NextResponse.json({ uploaded: images.length });
   } catch {
     return NextResponse.json({ error: "Unable to save request images" }, { status: 500 });

@@ -1,3 +1,4 @@
+import { useEffect, useState, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import {
   CarrierWorkspace,
@@ -12,6 +13,27 @@ import {
   Tracking,
   VerifyEmail,
 } from "./screens/VanScout";
+import { dashboardPath, fetchSessionUser, type SessionRole } from "./lib/client-auth";
+
+function RequireSession({ role, children }: { role: SessionRole; children: ReactNode }) {
+  const [sessionRole, setSessionRole] = useState<SessionRole | null>();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchSessionUser(controller.signal)
+      .then(user => setSessionRole(user?.role ?? null))
+      .catch(error => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setSessionRole(null);
+      });
+    return () => controller.abort();
+  }, []);
+
+  if (sessionRole === undefined) return <div className="session-loading" aria-busy="true" />;
+  if (sessionRole === null) return <Navigate to="/auth" replace />;
+  if (sessionRole !== role) return <Navigate to={dashboardPath(sessionRole)} replace />;
+  return children;
+}
 
 const App = () => (
   <BrowserRouter>
@@ -23,8 +45,8 @@ const App = () => (
       <Route path="/auth/verify-email" element={<VerifyEmail />} />
       <Route path="/auth/forgot-password" element={<ForgotPassword />} />
       <Route path="/auth/reset-password" element={<ResetPassword />} />
-      <Route path="/customer/*" element={<CustomerWorkspace />} />
-      <Route path="/carrier/*" element={<CarrierWorkspace />} />
+      <Route path="/customer/*" element={<RequireSession role="requester"><CustomerWorkspace /></RequireSession>} />
+      <Route path="/carrier/*" element={<RequireSession role="transporter"><CarrierWorkspace /></RequireSession>} />
       <Route path="/tracking" element={<Tracking />} />
       <Route path="/politika-privatnosti" element={<LegalPage document="privacy" />} />
       <Route path="/politika-o-kolacicima" element={<LegalPage document="cookies" />} />

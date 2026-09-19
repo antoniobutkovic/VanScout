@@ -19,8 +19,8 @@ backend process and no `VITE_API_BASE_URL` or `ALLOWED_ORIGINS` requirement.
 The default `npm run dev` uses `.env.staging` so Google sign-in works locally.
 Staging/Preview uses `.env.staging`, while production uses `.env.production`. Each environment
 must have its own Neon database, Google Web client ID, and 32+ character JWT
-secret. Templates are available in `.env.staging.example` and
-`.env.production.example`.
+secret. Keep the real `.env.staging` and `.env.production` files outside
+version control and fill in their placeholders for each environment.
 
 In Google Cloud, add `http://localhost:3100` and
 `https://van-scout-git-staging-antonios-projects-d03311f7.vercel.app` to the
@@ -60,6 +60,22 @@ Email delivery uses Zoho SMTP. `SMTP_USER` must be the exact mailbox that is
 allowed to send, and `SMTP_HOST` must match the server shown in that mailbox's
 Zoho Mail server configuration. The app sends using `SMTP_USER` directly, so a
 separate `MAIL_FROM` value is not required.
+
+## Stripe transporter credits
+
+Transporters purchase prepaid credits through Stripe-hosted Checkout. Configure
+`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, keep both server-side, and set
+`APP_URL` to the public application origin. The Stripe webhook destination is:
+
+```text
+https://your-domain.example/api/stripe/webhook
+```
+
+Subscribe it to `checkout.session.completed` and
+`checkout.session.async_payment_succeeded`. The webhook is the only path that
+adds purchased credits, and duplicate Stripe deliveries are handled
+idempotently. When both sides agree to a transport, 5% of the offer price is
+deducted once from the transporter's credit balance.
 
 The web experience includes the public landing pages, transport request wizard,
 customer offers and messaging workspace, carrier job flow, wallet, delivery

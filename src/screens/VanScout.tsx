@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { Realtime, type TokenRequest } from "ably";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { RecaptchaVerifier, signInWithPhoneNumber, signOut, type Auth, type ConfirmationResult } from "firebase/auth";
 import { AsYouType, getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
@@ -7,8 +8,11 @@ import { LanguagePicker, useLanguage } from "../i18n";
 import { Picker } from "../components/Picker";
 import { AddressPicker } from "../components/AddressPicker";
 import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-phone";
-import { loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
+import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from "../lib/client-auth";
+import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
 import type { AddressLocation } from "../lib/location";
+import type { TransportRequest, TransportStatus } from "../lib/transport-types";
+import type { CarrierProfile as CarrierProfileData, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
 
 type Offer = { name: string; price: string; rating: string; jobs: string; vehicle: string; time: string; note: string; initials: string; tone: string };
 type AuthRole = "requester" | "transporter";
@@ -222,15 +226,41 @@ function normalizedPhoneNumber(country: CountryCode, input: string) {
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
   const { t } = useLanguage();
-  return <div className="nav-actions">{kind ? <><button className="notice" aria-label={t("Notifications")}>◌</button><Link className="mini-avatar" to={kind === "carrier" ? "/carrier/profile" : "/customer/profile"}>{kind === "carrier" ? "MM" : "AN"}</Link>{kind === "customer" && <Link className="button dark short" to="/create-request">{t("New request")}</Link>}<LanguagePicker /></> : <><LanguagePicker /><Link className="sign-in" to="/auth">{t("Sign in")}</Link></>}</div>;
+  const nav = useNavigate();
+  const logout = () => {
+    clearAuthSession();
+    nav("/", { replace: true });
+  };
+  return <div className="nav-actions">{kind ? <>{kind === "customer" && <Link className="button dark short" to="/create-request" state={{ returnTo: "/customer" }}>{t("New request")}</Link>}<LanguagePicker /><button type="button" className="logout-button" onClick={logout}>{t("Log out")}</button></> : <><LanguagePicker /><Link className="sign-in" to="/auth">{t("Sign in")}</Link></>}</div>;
 }
 function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: string }) {
   const { t } = useLanguage();
-  const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["active", "Active", "/carrier/active"], ["messages", "Messages", "/carrier/messages"], ["wallet", "Wallet", "/carrier/wallet"]];
+  const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["active", "Active", "/carrier/active"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]];
   return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
 }
 function Footer() { const { t } = useLanguage(); return <footer className="footer"><div className="footer-brand"><Mark /><strong>Contact</strong><a href="mailto:info@van-scout.com">info@van-scout.com</a></div><div className="footer-legal"><strong>{t("Legal information")}</strong><Link to="/politika-privatnosti">{t("Privacy policy")}</Link><Link to="/politika-o-kolacicima">{t("Cookie policy")}</Link><Link to="/uvjeti-koristenja">{t("Terms of use")}</Link><Link to="/impressum">{t("Impressum")}</Link></div><small className="footer-copyright">{t("© 2026 VanScout. All rights reserved.")}</small></footer>; }
-function ItemImage({ type = "bed" }: { type?: "bed" | "photo" }) { const { t } = useLanguage(); return <div className={`item-image ${type}`}><span>{type === "bed" ? <>{t("Bed")}<br />{t("slats")}</> : t("Photo")}</span></div>; }
+function ItemImage({ type = "bed", label }: { type?: "bed" | "photo"; label?: string }) { const { t } = useLanguage(); return <div className={`item-image ${type}`}><span>{label || (type === "bed" ? <>{t("Bed")}<br />{t("slats")}</> : t("Photo"))}</span></div>; }
+function PrivateImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [objectUrl, setObjectUrl] = useState("");
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    const controller = new AbortController();
+    let createdUrl = "";
+    void fetch(src, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }).then(response => response.ok ? response.blob() : Promise.reject()).then(blob => {
+      createdUrl = URL.createObjectURL(blob);
+      setObjectUrl(createdUrl);
+    }).catch(() => undefined);
+    return () => { controller.abort(); if (createdUrl) URL.revokeObjectURL(createdUrl); };
+  }, [src]);
+  return objectUrl ? <img className={className} src={objectUrl} alt={alt} /> : <span className={className} aria-label={alt} />;
+}
+function FilePreview({ file }: { file: File }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => { const url = URL.createObjectURL(file); setSrc(url); return () => URL.revokeObjectURL(url); }, [file]);
+  return src ? <img src={src} alt="" /> : null;
+}
+function TransportImage({ request }: { request: Pick<TransportRequest, "id" | "itemName" | "imageIds"> }) { return request.imageIds[0] ? <PrivateImage className="transport-item-image" src={`/api/transports/${request.id}/images/${request.imageIds[0]}`} alt={request.itemName} /> : <ItemImage label={request.itemName} />; }
 
 type LegalDocument = "privacy" | "cookies" | "terms" | "impressum";
 const LEGAL_DOCUMENTS: Record<LegalDocument, { title: string; introduction: string }> = {
@@ -247,34 +277,96 @@ export function LegalPage({ document }: { document: LegalDocument }) {
 }
 
 export function Home() {
-  const { t } = useLanguage(); const workflows = [{ audience: "For requesters", steps: [["01", "Describe the item and route", "Add the details carriers need to make a clear offer."], ["02", "Compare offers", "Review price, vehicle and availability in one place."], ["03", "Book with confidence", "Choose the carrier that fits and follow the transport to delivery."]] }, { audience: "For carriers", steps: [["01", "Find a job that fits", "Browse routes, items and timing before you make an offer."], ["02", "Make a clear offer.", "Set your price and availability in minutes."], ["03", "Complete the transport", "Keep the customer updated, then build your review history."]] }];
+  const { t } = useLanguage();
+  const nav = useNavigate();
+  const [checkingSession, setCheckingSession] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchSessionUser(controller.signal)
+      .then(user => {
+        if (user) nav(dashboardPath(user.role), { replace: true });
+        else setCheckingSession(false);
+      })
+      .catch(error => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setCheckingSession(false);
+      });
+    return () => controller.abort();
+  }, [nav]);
+  if (checkingSession) return <div className="session-loading" aria-busy="true" />;
+  const workflows = [{ audience: "For requesters", steps: [["01", "Describe the item and route", "Add the details carriers need to make a clear offer."], ["02", "Compare offers", "Review price, vehicle and availability in one place."], ["03", "Book with confidence", "Choose the carrier that fits and follow the transport to delivery."]] }, { audience: "For carriers", steps: [["01", "Find a job that fits", "Browse routes, items and timing before you make an offer."], ["02", "Make a clear offer.", "Set your price and availability in minutes."], ["03", "Complete the transport", "Keep the customer updated, then build your review history."]] }];
   return <div className="site"><Topbar /><main><section className="home-hero"><div className="home-copy"><h1>{t("Request or offer transport services without the hassle.")}</h1><div className="actions"><Link className="button moss" to="/create-request">{t("Request transport")} <Arrow /></Link><Link className="quiet-link" to="/auth?role=transporter">{t("I'm a carrier")}</Link></div></div><div className="hero-image"><img src={IMAGES.HOME_DOT_HERO} alt={t("Furniture and boxes being loaded into a cargo van.")} /><div className="hero-sticker"><span>{t("Today")}</span><RouteLine small /><b>IKEA Zagreb → Trešnjevka</b></div></div></section><section className="steps"><div className="workflow-rows">{workflows.map(({ audience, steps }) => <section className="workflow-row" key={audience}><h2>{t(audience)}</h2><div>{steps.map(([number, title, copy]) => <article key={number}><span>{number}</span><h3>{t(title)}</h3><p>{t(copy)}</p></article>)}</div></section>)}</div></section><section className="trust"><div><h2>{t("Choose with confidence.")}</h2></div><ul><li>{t("Verified phone numbers")}</li><li>{t("Carrier profiles and vehicles")}</li><li>{t("Real reviews after every job")}</li></ul></section></main><Footer /></div>;
 }
 
 export function CreateRequest() {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const nav = useNavigate();
+  const loc = useLocation();
+  const returnTo = (loc.state as { returnTo?: string } | null)?.returnTo === "/customer" ? "/customer" : "/";
   const [step, setStep] = useState(0);
   const [category, setCategory] = useState("Furniture");
   const [itemName, setItemName] = useState("");
-  const [timing, setTiming] = useState("I’m flexible");
-  const [expanded, setExpanded] = useState("");
+  const [description, setDescription] = useState("");
+  const [timing, setTiming] = useState("Choose a date");
+  const [preferredDateFrom, setPreferredDateFrom] = useState("");
+  const [preferredDateTo, setPreferredDateTo] = useState("");
+  const [dateRange, setDateRange] = useState(false);
   const [pickupLocation, setPickupLocation] = useState<AddressLocation | null>(null);
   const [deliveryLocation, setDeliveryLocation] = useState<AddressLocation | null>(null);
   const [dimensions, setDimensions] = useState({ length: "", width: "", weight: "" });
   const [photos, setPhotos] = useState<PendingRequestImage[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<Array<PendingRequestImage & { url: string }>>([]);
   const [photoError, setPhotoError] = useState("");
+  const [publishError, setPublishError] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const photoInput = useRef<HTMLInputElement | null>(null);
   const dimensionsComplete = Object.values(dimensions).every(value => Number(value) > 0);
   const locationForCurrentStep = step === 2 ? pickupLocation : step === 3 ? deliveryLocation : true;
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [step]);
+
   const next = async () => {
     if (!locationForCurrentStep) return;
     if (step !== WIZARD_STEPS.length - 1) return setStep(step + 1);
-    const token = window.localStorage.getItem("auth_token") || "";
+    const token = getAuthToken();
     if (!token) return nav("/auth");
-    await syncPendingRequestImages(token).catch(() => false);
-    nav("/customer");
+    if (!pickupLocation || !deliveryLocation) return;
+    setPublishing(true);
+    setPublishError("");
+    try {
+      const response = await fetch("/api/transports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          category,
+          itemName,
+          description,
+          lengthCm: Number(dimensions.length),
+          widthCm: Number(dimensions.width),
+          weightKg: Number(dimensions.weight),
+          pickup: pickupLocation,
+          delivery: deliveryLocation,
+          timing,
+          preferredDateFrom: timing === "Choose a date" && preferredDateFrom ? preferredDateFrom : null,
+          preferredDateTo: timing === "Choose a date" && dateRange && preferredDateTo ? preferredDateTo : null,
+        }),
+      });
+      const payload = await response.json() as { transport?: TransportRequest; error?: string };
+      if (response.status === 401) {
+        clearAuthSession();
+        return nav("/auth");
+      }
+      if (!response.ok) throw new Error(payload.error || t("Unable to publish transport"));
+      await syncPendingRequestImages(token, payload.transport?.id).catch(() => false);
+      await clearPendingRequestImages().catch(() => undefined);
+      setPhotos([]);
+      nav("/customer");
+    } catch (error) {
+      setPublishError(error instanceof Error ? error.message : t("Unable to publish transport"));
+    } finally {
+      setPublishing(false);
+    }
   };
 
   useEffect(() => {
@@ -324,17 +416,21 @@ export function CreateRequest() {
     }
   };
 
-  return <div className="wizard"><header><Mark /><div className="wizard-header-actions"><span>{step + 1} / {WIZARD_STEPS.length}</span><LanguagePicker /><Link to="/">×</Link></div></header><div className="wizard-progress"><b style={{ width: `${((step + 1) / WIZARD_STEPS.length) * 100}%` }} />{WIZARD_STEPS.map((label, index) => <span className={index === step ? "current" : ""} key={label}>{t(label)}</span>)}</div><main>
-    {step === 0 && <section><h1>{t("What are you moving?")}</h1><div className="choices">{CATEGORIES.map(item => <button className={category === item ? "selected" : ""} key={item} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><label>{t("Item name")}<input value={itemName} onChange={event => setItemName(event.target.value)} placeholder={t("Bed slats")} required /></label><div className="inline-inputs"><label>{t("Length")}<input type="number" min="0.01" step="any" value={dimensions.length} onChange={event => setDimensions({ ...dimensions, length: event.target.value })} placeholder="cm" required /></label><label>{t("Width")}<input type="number" min="0.01" step="any" value={dimensions.width} onChange={event => setDimensions({ ...dimensions, width: event.target.value })} placeholder="cm" required /></label><label>{t("Weight")}<input type="number" min="0.01" step="any" value={dimensions.weight} onChange={event => setDimensions({ ...dimensions, weight: event.target.value })} placeholder="kg" required /></label></div><label><span className="field-label">{t("Description")} <em>({t("Optional")})</em></span><textarea placeholder={t("Anything carriers should know about the item?")} /></label></section>}
+  const reviewTiming = timing === "Choose a date" && preferredDateFrom
+    ? formatTransportDates(preferredDateFrom, dateRange ? preferredDateTo : null, language)
+    : t(timing);
+
+  return <div className="wizard"><header><Mark /><div className="wizard-header-actions"><span>{step + 1} / {WIZARD_STEPS.length}</span><LanguagePicker /><Link to={returnTo}>×</Link></div></header><div className="wizard-progress"><b style={{ width: `${((step + 1) / WIZARD_STEPS.length) * 100}%` }} />{WIZARD_STEPS.map((label, index) => <span className={index === step ? "current" : ""} key={label}>{t(label)}</span>)}</div><main>
+    {step === 0 && <section><h1>{t("What are you moving?")}</h1><div className="choices">{CATEGORIES.map(item => <button className={category === item ? "selected" : ""} key={item} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><label>{t("Item name")}<input value={itemName} onChange={event => setItemName(event.target.value)} placeholder={t("Bed slats")} required /></label><div className="inline-inputs"><label>{t("Length")}<input type="number" min="0.01" step="any" value={dimensions.length} onChange={event => setDimensions({ ...dimensions, length: event.target.value })} placeholder="cm" required /></label><label>{t("Width")}<input type="number" min="0.01" step="any" value={dimensions.width} onChange={event => setDimensions({ ...dimensions, width: event.target.value })} placeholder="cm" required /></label><label>{t("Weight")}<input type="number" min="0.01" step="any" value={dimensions.weight} onChange={event => setDimensions({ ...dimensions, weight: event.target.value })} placeholder="kg" required /></label></div><label><span className="field-label">{t("Description")} <em>({t("Optional")})</em></span><textarea value={description} onChange={event => setDescription(event.target.value)} placeholder={t("Anything carriers should know about the item?")} /></label></section>}
     {step === 1 && <section className="visual-step"><h1>{t("Show carriers what they’re moving.")}</h1><div className={`drop ${photoPreviews.length ? "has-photos" : ""}`} onDragOver={event => event.preventDefault()} onDrop={dropPhotos}><input ref={photoInput} className="photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={choosePhotos} />{photoPreviews.length > 0 && <div className="photo-previews">{photoPreviews.map((photo, index) => <figure key={photo.id}><img src={photo.url} alt={`${t("Selected photo")} ${index + 1}`} /><button type="button" aria-label={t("Remove photo")} onClick={() => void removePhoto(photo.id)}>×</button></figure>)}</div>}<span>{t("Choose photos from your device or drop them here")}</span><button type="button" className="button dark short" disabled={photos.length >= MAX_REQUEST_IMAGES} onClick={() => photoInput.current?.click()}>{t("Choose photos")}</button></div>{photoError && <p className="field-error photo-error" role="alert">{photoError}</p>}<p className="help">{t("Photos help carriers give you a more accurate price.")} {t("Up to 3 photos.")}</p></section>}
-    {step === 2 && <AddressStep label={t("Where should it be picked up?")} kind="pickup" location={pickupLocation} onLocationChange={setPickupLocation} expanded={expanded === "pickup"} onExpand={() => setExpanded(expanded === "pickup" ? "" : "pickup")} />}
-    {step === 3 && <AddressStep label={t("Where is it going?")} kind="delivery" location={deliveryLocation} onLocationChange={setDeliveryLocation} expanded={expanded === "delivery"} onExpand={() => setExpanded(expanded === "delivery" ? "" : "delivery")} />}
-    {step === 4 && <section><p className="eyebrow">{t("Make it work for you")}</p><h1>{t("When should it be moved?")}</h1><div className="timing">{["As soon as possible", "Choose a date", "I’m flexible"].map(item => <button className={timing === item ? "selected" : ""} key={item} onClick={() => setTiming(item)}><b>{t(item)}</b>{item === "I’m flexible" && <span>{t("Flexible jobs can often receive cheaper offers because carriers can combine them with existing routes.")}</span>}</button>)}</div>{timing === "Choose a date" && <label>{t("Preferred date")}<input type="date" /></label>}</section>}
-    {step === 5 && <section className="review-request"><p className="eyebrow">{t("One more look")}</p><h1>{t("Ready to publish?")}</h1><article><ItemImage /><div><span>{t("Furniture")}</span><h2>{itemName}</h2><p>{pickupLocation?.formatted || t("Pickup location")} <i>→</i> {deliveryLocation?.formatted || t("Delivery location")}</p><small>{t(timing)} · {t("No loading help required")}</small></div><button>{t("Edit")}</button></article></section>}
-  </main><footer><button className="button ghost" disabled={step === 0} onClick={() => setStep(Math.max(0, step - 1))}>{t("Back")}</button><button className="button dark" disabled={(step === 0 && (!dimensionsComplete || !itemName.trim())) || !locationForCurrentStep} onClick={() => void next()}>{t(step === WIZARD_STEPS.length - 1 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>;
+    {step === 2 && <AddressStep label={t("Where should it be picked up?")} kind="pickup" location={pickupLocation} onLocationChange={setPickupLocation} />}
+    {step === 3 && <AddressStep label={t("Where is it going?")} kind="delivery" location={deliveryLocation} onLocationChange={setDeliveryLocation} />}
+    {step === 4 && <section><h1>{t("When should it be moved?")}</h1><div className="timing">{["Choose a date", "I’m flexible"].map(item => <button className={timing === item ? "selected" : ""} key={item} onClick={() => setTiming(item)}><b>{t(item)}</b>{item === "I’m flexible" && <span>{t("Flexible jobs can often receive cheaper offers because carriers can combine them with existing routes.")}</span>}</button>)}</div>{timing === "Choose a date" && (dateRange ? <div className="date-range"><label>{t("From")}<input type="date" value={preferredDateFrom} onChange={event => setPreferredDateFrom(event.target.value)} required /></label><label>{t("To")}<input type="date" min={preferredDateFrom || undefined} value={preferredDateTo} onChange={event => setPreferredDateTo(event.target.value)} required /></label><button type="button" className="date-range-toggle" onClick={() => { setDateRange(false); setPreferredDateTo(""); }}>{t("Use a single date")}</button>{preferredDateFrom && preferredDateTo && preferredDateTo < preferredDateFrom && <p className="field-error" role="alert">{t("End date must be on or after start date")}</p>}</div> : <div className="date-single"><label>{t("Transport date")}<input type="date" value={preferredDateFrom} onChange={event => setPreferredDateFrom(event.target.value)} required /></label><button type="button" className="date-range-toggle" onClick={() => setDateRange(true)}>+ {t("Add date range")}</button></div>)}</section>}
+    {step === 5 && <section className="review-request"><h1>{t("Ready to publish?")}</h1><article>{photoPreviews[0] ? <img className="request-review-image" src={photoPreviews[0].url} alt={`${t("Selected photo")} 1`} /> : <ItemImage label={itemName} />}<div><span>{t(category)}</span><h2>{itemName}</h2><p>{pickupLocation?.formatted || t("Pickup location")} <i>→</i> {deliveryLocation?.formatted || t("Delivery location")}</p><small>{reviewTiming}</small></div></article>{publishError && <p className="auth-message error" role="alert">{publishError}</p>}</section>}
+  </main><footer><button className="button ghost" disabled={step === 0 || publishing} onClick={() => setStep(Math.max(0, step - 1))}>{t("Back")}</button><button className="button dark" disabled={publishing || (step === 0 && (!dimensionsComplete || !itemName.trim())) || !locationForCurrentStep || (step === 4 && timing === "Choose a date" && (!preferredDateFrom || (dateRange && (!preferredDateTo || preferredDateTo < preferredDateFrom))))} onClick={() => void next()}>{t(step === WIZARD_STEPS.length - 1 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>;
 }
 
-function AddressStep({ label, kind, location, onLocationChange, expanded, onExpand }: { label: string; kind: "pickup" | "delivery"; location: AddressLocation | null; onLocationChange: (location: AddressLocation | null) => void; expanded: boolean; onExpand: () => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; const kindLabel = t(kind); return <section>{!isPickup && <p className="eyebrow">{t("Last stop")}</p>}<h1>{label}</h1><AddressPicker label={t(isPickup ? "Pickup location" : "Delivery location")} placeholder={t("Search for an address, business or landmark")} value={location} onChange={onLocationChange} precisionHint={t(isPickup ? "Move the pin to the exact pickup point." : "Move the pin to the exact delivery point.")} /><button className="expand" onClick={onExpand}>{expanded ? t("Hide {kind} details", { kind: kindLabel }) : t("Add {kind} details", { kind: kindLabel })}</button>{expanded && <div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div>}</section>; }
+function AddressStep({ label, kind, location, onLocationChange }: { label: string; kind: "pickup" | "delivery"; location: AddressLocation | null; onLocationChange: (location: AddressLocation | null) => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; return <section><h1>{label}</h1><AddressPicker label={t(isPickup ? "Pickup location" : "Delivery location")} placeholder={t("Search for an address, business or landmark")} value={location} onChange={onLocationChange} precisionHint={isPickup ? undefined : t("Move the pin to the exact delivery point.")} /><div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div></section>; }
 export function Registration() {
   const { language, t } = useLanguage();
   const nav = useNavigate();
@@ -698,25 +794,455 @@ export function ResetPassword() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!token ? <p className="auth-message error">{t("This reset link is invalid or expired")}</p> : <form className="auth-form" onSubmit={handleSubmit}><label>{t("New password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordError)} required />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation">{t("Confirm password")}<PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordConfirmationError)} required />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Reset password")} <Arrow /></button></form>}<Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!token ? <p className="auth-message error">{t("This reset link is invalid or expired")}</p> : <form className="auth-form" onSubmit={handleSubmit}><label>{t("New password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} autoComplete="new-password" minLength={8} aria-describedby="reset-password-hint" aria-invalid={Boolean(passwordError)} required /><span className="field-hint" id="reset-password-hint">{t("Use at least 8 characters")}</span>{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation">{t("Confirm password")}<PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" minLength={8} aria-invalid={Boolean(passwordConfirmationError)} required />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Reset password")} <Arrow /></button></form>}<Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
 }
 
-function RequestRow({ booked, onClick }: { booked?: boolean; onClick: () => void }) { const { t } = useLanguage(); return <article className="request-row"><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb <i>→</i> Trešnjevka</p><span className={`status ${booked ? "booked" : ""}`}>{booked ? t("Carrier booked") : t("3 offers · Looking for carriers")}</span></div><div className="request-meta"><b>12 km</b><span>{t("Flexible pickup")}</span></div><button className="button dark short" onClick={onClick}>{booked ? t("Open transport") : t("View offers")}</button></article>; }
-export function CustomerWorkspace() { const { t } = useLanguage(); const loc = useLocation(); const nav = useNavigate(); const [view, setView] = useState(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests"); const [detail, setDetail] = useState(false); const [accepted, setAccepted] = useState(false); const [offer, setOffer] = useState<Offer | null>(null); const [sort, setSort] = useState("Recommended"); const go = (next: string) => { setView(next); nav(next === "messages" ? "/customer/messages" : next === "profile" ? "/customer/profile" : "/customer"); }; const list = useMemo(() => sort === "Lowest price" ? [...OFFERS].sort((a, b) => Number(a.price.slice(1)) - Number(b.price.slice(1))) : OFFERS, [sort]); return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !detail && <section className="requests"><div className="workspace-title"><div><p className="eyebrow">{t("Your transport, at a glance")}</p><h1>{t("Your transports")}</h1></div><div className="tabs"><button className="selected">{t("Active")}</button><button>{t("Completed")}</button></div></div><div className="rows"><RequestRow onClick={() => setDetail(true)} /><RequestRow booked onClick={() => { setAccepted(true); setDetail(true); }} /></div></section>}{view === "requests" && detail && <RequestDetail accepted={accepted} sort={sort} onSort={setSort} offers={list} onBack={() => setDetail(false)} onOpenProfile={setOffer} onMessage={() => go("messages")} onAccept={setOffer} onTracking={() => nav("/tracking")} onReview={() => go("review")} />}{view === "messages" && <Messages onAccept={() => setOffer(OFFERS[0])} />}{view === "profile" && <CustomerProfile />}{view === "review" && <Review onDone={() => { go("requests"); setDetail(false); }} />}</main>{offer && <OfferDialog offer={offer} onClose={() => setOffer(null)} onAccept={() => { setAccepted(true); setOffer(null); }} onMessage={() => { setOffer(null); go("messages"); }} />}</div>; }
-function RequestDetail({ accepted, sort, onSort, offers, onBack, onOpenProfile, onMessage, onAccept, onTracking, onReview }: { accepted: boolean; sort: string; onSort: (x: string) => void; offers: Offer[]; onBack: () => void; onOpenProfile: (x: Offer) => void; onMessage: () => void; onAccept: (x: Offer) => void; onTracking: () => void; onReview: () => void }) { const { t } = useLanguage(); return <section className="request-detail"><button className="back" onClick={onBack}>← {t("Your transports")}</button><header><div><p className="eyebrow">{accepted ? t("Carrier booked") : t("3 offers received")}</p><h1>{t("Bed slats")}</h1><p>IKEA Zagreb <i>→</i> Trešnjevka</p></div><span className={`status large ${accepted ? "booked" : ""}`}>{accepted ? t("Carrier booked") : t("Looking for carriers")}</span></header><div className="detail-layout"><aside><ItemImage /><h3>{t("Request summary")}</h3><dl><div><dt>{t("Route")}</dt><dd>IKEA Zagreb → Trešnjevka</dd></div><div><dt>{t("Distance")}</dt><dd>12 km</dd></div><div><dt>{t("Timing")}</dt><dd>{t("Flexible pickup")}</dd></div><div><dt>{t("Loading")}</dt><dd>{t("No loading help required")}</dd></div></dl><div className="mini-map"><RouteLine /><b>12 km</b></div></aside><div className="primary-detail">{accepted ? <Accepted onTracking={onTracking} onReview={onReview} /> : <><div className="offers-heading"><div><h2>{t("Choose a carrier")}</h2><p>{t("Compare price, availability and previous reviews.")}</p></div><div className="sort">{["Recommended", "Lowest price", "Earliest pickup"].map(x => <button className={sort === x ? "selected" : ""} onClick={() => onSort(x)} key={x}>{t(x)}</button>)}</div></div>{offers.map(o => <OfferCard key={o.name} offer={o} onProfile={() => onOpenProfile(o)} onMessage={onMessage} onAccept={() => onAccept(o)} />)}</>}</div></div></section>; }
+function transportStatusLabel(status: TransportStatus) {
+  return status === "completed" ? "Completed" : status === "carrier_booked" ? "Carrier booked" : "Looking for carriers";
+}
+
+function formatTransportDates(from: string, to: string | null, language: "en" | "hr") {
+  const formatter = new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const format = (value: string) => {
+    const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value);
+    return Number.isNaN(parsed.getTime()) ? value : formatter.format(parsed);
+  };
+  return to ? `${format(from)} – ${format(to)}` : format(from);
+}
+
+function formatEuro(cents: number) {
+  return new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }).format(cents / 100);
+}
+
+function RequestRow({ request, onClick }: { request: TransportRequest; onClick: () => void }) {
+  const { language, t } = useLanguage();
+  return <article className="request-row"><TransportImage request={request} /><div><h3>{request.itemName}</h3><p>{request.pickup.formatted} <i>→</i> {request.delivery.formatted}</p><span className={`status ${request.status !== "looking_for_carriers" ? "booked" : ""}`}>{t(transportStatusLabel(request.status))}</span></div><div className="request-meta"><b>{request.distanceKm} km</b><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span></div><button className="button dark short" onClick={onClick}>{t("Open transport")}</button></article>;
+}
+
+export function CustomerWorkspace() {
+  const { t } = useLanguage();
+  const loc = useLocation();
+  const nav = useNavigate();
+  const [view, setView] = useState(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests");
+  const [filter, setFilter] = useState<"active" | "completed">("active");
+  const [transports, setTransports] = useState<TransportRequest[]>([]);
+  const [selectedTransport, setSelectedTransport] = useState<TransportRequest | null>(null);
+  const [loadingTransports, setLoadingTransports] = useState(true);
+  const [transportError, setTransportError] = useState("");
+  const go = (next: string, offerId?: string) => { setView(next); nav(next === "messages" ? `/customer/messages${offerId ? `?offer=${offerId}` : ""}` : next === "profile" ? "/customer/profile" : "/customer"); };
+
+  useEffect(() => {
+    setView(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests");
+    setSelectedTransport(null);
+  }, [loc.pathname]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const token = getAuthToken();
+    setLoadingTransports(true);
+    setTransportError("");
+    setTransports([]);
+    if (!token) {
+      setLoadingTransports(false);
+      nav("/auth", { replace: true });
+      return () => controller.abort();
+    }
+    void fetch(`/api/transports?status=${filter}`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
+      .then(async response => {
+        const payload = await response.json() as { transports?: TransportRequest[]; error?: string };
+        if (response.status === 401) {
+          clearAuthSession();
+          nav("/auth", { replace: true });
+          return;
+        }
+        if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
+        setTransports(payload.transports || []);
+      })
+      .catch(error => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setTransportError(error instanceof Error ? error.message : t("Unable to load transports"));
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoadingTransports(false); });
+    return () => controller.abort();
+  }, [filter, nav, t]);
+
+  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title"><div><h1>{t("Your transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => setSelectedTransport(request)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onBack={() => setSelectedTransport(null)} onOpenMessages={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
+}
+
+function RequestDetail({ request, onBack, onOpenMessages }: { request: TransportRequest; onBack: () => void; onOpenMessages: (offerId: string) => void }) {
+  const { language, t } = useLanguage();
+  const [offers, setOffers] = useState<TransportOffer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const loadOffers = async () => {
+    const token = getAuthToken();
+    if (!token) return;
+    try {
+      const response = await fetch(`/api/transports/${request.id}/offers`, { headers: { Authorization: `Bearer ${token}` } });
+      const payload = await response.json() as { offers?: TransportOffer[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to load offers"));
+      setOffers(payload.offers || []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : t("Unable to load offers"));
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { void loadOffers(); }, [request.id]);
+  return <section className="request-detail"><button className="back" onClick={onBack}>← {t("Your transports")}</button><header><div><p className="eyebrow">{t(request.category)}</p><h1>{request.itemName}</h1><p>{request.pickup.formatted} <i>→</i> {request.delivery.formatted}</p></div><span className={`status large ${request.status !== "looking_for_carriers" ? "booked" : ""}`}>{t(transportStatusLabel(request.status))}</span></header><div className="detail-layout"><aside><ItemImage label={request.itemName} /><h3>{t("Request summary")}</h3><dl><div><dt>{t("Route")}</dt><dd>{request.pickup.formatted} → {request.delivery.formatted}</dd></div><div><dt>{t("Distance")}</dt><dd>{request.distanceKm} km</dd></div><div><dt>{t("Timing")}</dt><dd>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</dd></div><div><dt>{t("Dimensions")}</dt><dd>{request.lengthCm} × {request.widthCm} cm · {request.weightKg} kg</dd></div>{request.description && <div><dt>{t("Description")}</dt><dd>{request.description}</dd></div>}</dl></aside><div className="primary-detail"><div className="offers-heading"><div><h2>{t("Offers")}</h2><p>{t("Chat with carriers before choosing who is ready for the transport.")}</p></div></div>{error && <p className="transport-list-message error">{error}</p>}{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : offers.length ? <div className="live-offers">{offers.map(offer => <article className="offer live-offer" key={offer.id}><div className="offer-person"><b>{offer.companyName || offer.carrierName}</b><span>{offer.carrierName} · {offer.completedTransports} {t("completed transports")}</span></div><div className="offer-time"><b>{formatTransportDates(offer.availableDate, null, language)}</b><span>{t("Available date")}</span></div>{offer.message && <p>“{offer.message}”</p>}<div className="price"><b>{formatEuro(offer.priceCents)}</b><span>{t("all in")}</span></div><div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="button dark short" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div></article>)}</div> : <div className="empty-offers"><h3>{t("No offers yet")}</h3><p>{t("Your request is live. Carriers can now review it and send an offer.")}</p></div>}</div></div></section>;
+}
 function OfferCard({ offer, onProfile, onMessage, onAccept }: { offer: Offer; onProfile: () => void; onMessage: () => void; onAccept: () => void }) { const { t } = useLanguage(); return <article className="offer"><button onClick={onProfile}><Avatar offer={offer} /></button><div className="offer-person"><button onClick={onProfile}>{offer.name}</button><span>★ {offer.rating} · {t(offer.jobs)}</span><small>{offer.vehicle}</small></div><div className="offer-time"><b>{t(offer.time)}</b><span>{t("Available window")}</span></div><p>“{t(offer.note)}”</p><div className="price"><b>{offer.price}</b><span>{t("all in")}</span></div><div className="offer-actions"><button onClick={onMessage}>{t("Message")}</button><button onClick={onProfile}>{t("View profile")}</button><button className="button moss short" onClick={onAccept}>{t("Accept")}</button></div></article>; }
 function OfferDialog({ offer, onClose, onAccept, onMessage }: { offer: Offer; onClose: () => void; onAccept: () => void; onMessage: () => void }) { const { t } = useLanguage(); const [profile, setProfile] = useState(true); return <div className="overlay">{profile ? <aside className="side"><button className="close" onClick={onClose}>×</button><div className="profile-head"><Avatar offer={offer} large /><div><p className="eyebrow">{t("Verified carrier")}</p><h2>{offer.name}</h2><p>★ {offer.rating} · {t(offer.jobs)} {t("completed")}</p></div></div><p>{t("I move furniture and store purchases around Zagreb with a clean, fully-equipped large van. Clear communication, careful handling.")}</p><section><h3>{t("Vehicle")}</h3><div className="vehicle">▰ <div><b>{offer.vehicle}</b><span>{t("Large van")} · 3.2m {t("cargo length")}</span></div></div></section><section><h3>{t("Previous work")}</h3><div className="work-shots"><span /><span /><span /></div></section><blockquote>{t("On time, careful with everything, and a genuinely nice person.")}<footer>— Ana, {t("verified customer")}</footer></blockquote><footer className="side-actions"><button className="button ghost" onClick={onMessage}>{t("Message")}</button><button className="button moss" onClick={() => setProfile(false)}>{t("Accept")} {offer.price}</button></footer></aside> : <div className="confirm"><button className="close" onClick={onClose}>×</button><p className="eyebrow">{t("Confirm carrier")}</p><h2>{t("Choose {name} for this transport?", { name: offer.name })}</h2><div><b>{offer.price}</b><span>IKEA Zagreb → Trešnjevka</span><span>{t(offer.time)}</span></div><p>{t("After accepting, you and the carrier will be able to see each other’s contact information.")}</p><footer><button className="button ghost" onClick={() => setProfile(true)}>{t("Cancel")}</button><button className="button moss" onClick={onAccept}>{t("Accept offer")}</button></footer></div>}</div>; }
 function Accepted({ onTracking, onReview }: { onTracking: () => void; onReview: () => void }) { const { t } = useLanguage(); return <div className="accepted"><section className="booked-card"><Avatar large /><div><p className="eyebrow">{t("Your carrier")}</p><h2>Mario M.</h2><p>★ 4.9 · Renault Master</p></div><div><a href="tel:+385915552400">+385 91 555 2400</a><a href="mailto:mario@example.com">mario@example.com</a></div></section><div className="transport-steps"><div className="done"><b>✓</b><span><strong>{t("Booked")}</strong><small>{t("Mario accepted your transport.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("Pickup")}</strong><small>{t("Today")}, 17:00–19:00</small></span></div><div><b>○</b><span><strong>{t("In transit")}</strong><small>{t("Live updates will appear here.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("Review the transport when it’s done.")}</small></span></div></div><div className="actions"><button className="button dark" onClick={onTracking}>{t("Open delivery tracking")} <Arrow /></button><button className="quiet-link" onClick={onReview}>{t("Preview review flow")}</button></div></div>; }
 function Messages({ onAccept }: { onAccept: () => void }) { const { t } = useLanguage(); const [note, setNote] = useState(""); const [sent, setSent] = useState<string[]>([]); return <section className="messages-page"><header><p className="eyebrow">{t("Keep it in one place")}</p><h1>{t("Messages")}</h1></header><div className="messages"><aside><button className="conversation selected"><Avatar /><span><b>Mario M.</b><small>{t("Sounds good—17:00 works.")}</small></span><i>2m</i></button><button className="conversation"><Avatar offer={OFFERS[1]} /><span><b>Luka P.</b><small>{t("I can do tomorrow morning.")}</small></span><i>1h</i></button></aside><article><header><div><Avatar /><span><b>Mario M.</b><small>★ 4.9 · Renault Master</small></span></div><b className="offer-tag">{t("Offer: €32")}</b></header><div className="chat-context"><span>{t("Pickup: Today, 17:00–19:00")}</span><button className="button moss short" onClick={onAccept}>{t("Accept offer")}</button></div><div className="thread"><p className="bubble theirs">{t("Hi Ana, I’m already collecting an order near IKEA this afternoon. I can pick up the bed slats between 17:00–19:00.")}</p><p className="bubble mine">{t("Great, that works. It’s ground floor pickup and the slats are already packed.")}</p><p className="contact-note">{t("Contact information can be shared after an offer is accepted.")}</p>{sent.map(x => <p className="bubble mine" key={x}>{x}</p>)}</div><form onSubmit={event => { event.preventDefault(); if (note.trim()) { setSent([...sent, note.trim()]); setNote(""); } }}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")}>↑</button></form></article></div></section>; }
+function LiveMessages() {
+  const { language, t } = useLanguage();
+  const [searchParams] = useSearchParams();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedId, setSelectedId] = useState(() => searchParams.get("offer") || "");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [userId, setUserId] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [agreementSaving, setAgreementSaving] = useState(false);
+  const [realtimeUserId, setRealtimeUserId] = useState("");
+  const [realtimeEnabled, setRealtimeEnabled] = useState(false);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const ablyClient = useRef<Realtime | null>(null);
+  const selectedIdRef = useRef("");
+  const selected = conversations.find(conversation => conversation.offerId === selectedId) || null;
+  const conversationIds = useMemo(() => conversations.map(conversation => conversation.offerId).sort().join(","), [conversations]);
+
+  const loadConversations = useCallback(async () => {
+    const token = getAuthToken();
+    if (!token) return;
+    try {
+      const response = await fetch("/api/conversations", { headers: { Authorization: `Bearer ${token}` } });
+      const payload = await response.json() as { conversations?: Conversation[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to load messages"));
+      const next = payload.conversations || [];
+      setConversations(next);
+      setSelectedId(current => current && next.some(item => item.offerId === current) ? current : next[0]?.offerId || "");
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : t("Unable to load messages"));
+    }
+  }, [t]);
+
+  const loadMessages = useCallback(async (offerId: string) => {
+    const token = getAuthToken();
+    if (!token || !offerId) return;
+    try {
+      const response = await fetch(`/api/conversations/${offerId}/messages`, { headers: { Authorization: `Bearer ${token}` } });
+      const payload = await response.json() as { messages?: ChatMessage[]; userId?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to load messages"));
+      setMessages(payload.messages || []);
+      setUserId(payload.userId || "");
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : t("Unable to load messages"));
+    }
+  }, [t]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    if (!selectedId) setMessages([]);
+    else void loadMessages(selectedId);
+  }, [selectedId, loadMessages]);
+
+  useEffect(() => {
+    void loadConversations();
+    void fetchSessionUser().then(async user => {
+      setRealtimeUserId(user?.id || "");
+      const token = getAuthToken();
+      if (!user || !token) return;
+      const response = await fetch("/api/realtime/status", { headers: { Authorization: `Bearer ${token}` } });
+      const payload = await response.json() as { enabled?: boolean };
+      setRealtimeEnabled(response.ok && payload.enabled === true);
+    }).catch(() => {
+      setRealtimeUserId("");
+      setRealtimeEnabled(false);
+    });
+  }, [loadConversations]);
+
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token || !realtimeUserId || !realtimeEnabled) return;
+    const client = new Realtime({
+      autoConnect: true,
+      authCallback: async (_params, callback) => {
+        try {
+          const response = await fetch("/api/realtime/ably-token", { headers: { Authorization: `Bearer ${token}` } });
+          const payload = await response.json() as TokenRequest & { error?: string };
+          if (!response.ok) throw new Error(payload.error || "Realtime is unavailable");
+          callback(null, payload);
+        } catch (authError) {
+          callback(authError instanceof Error ? authError.message : "Realtime is unavailable", null);
+        }
+      },
+    });
+    ablyClient.current = client;
+    const connectionListener = () => setRealtimeConnected(client.connection.state === "connected");
+    client.connection.on(connectionListener);
+    connectionListener();
+    return () => {
+      client.connection.off(connectionListener);
+      client.close();
+      if (ablyClient.current === client) ablyClient.current = null;
+      setRealtimeConnected(false);
+    };
+  }, [realtimeEnabled, realtimeUserId]);
+
+  useEffect(() => {
+    const client = ablyClient.current;
+    if (!client || !realtimeConnected || !realtimeUserId) return;
+    let cancelled = false;
+    const subscriptions: Array<{ channelName: string; listener: () => void }> = [];
+    void (async () => {
+      try {
+        await client.auth.authorize();
+        if (cancelled) return;
+        const userChannelName = `user:${realtimeUserId}`;
+        const userListener = () => void loadConversations();
+        subscriptions.push({ channelName: userChannelName, listener: userListener });
+        await client.channels.get(userChannelName).subscribe(userListener);
+        for (const offerId of conversationIds ? conversationIds.split(",") : []) {
+          if (cancelled) return;
+          const channelName = `chat:${offerId}`;
+          const listener = () => {
+            void loadConversations();
+            if (selectedIdRef.current === offerId) void loadMessages(offerId);
+          };
+          subscriptions.push({ channelName, listener });
+          await client.channels.get(channelName).subscribe(listener);
+        }
+      } catch {
+        setRealtimeConnected(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      for (const subscription of subscriptions) client.channels.get(subscription.channelName).unsubscribe(subscription.listener);
+    };
+  }, [conversationIds, realtimeConnected, realtimeUserId, loadConversations, loadMessages]);
+
+  useEffect(() => {
+    if (realtimeConnected) return;
+    const timer = window.setInterval(() => {
+      void loadConversations();
+      if (selectedIdRef.current) void loadMessages(selectedIdRef.current);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [realtimeConnected, loadConversations, loadMessages]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = note.trim();
+    const token = getAuthToken();
+    if (!body || !token || !selectedId) return;
+    setNote("");
+    const response = await fetch(`/api/conversations/${selectedId}/messages`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ body }) });
+    const payload = await response.json() as { message?: ChatMessage; error?: string };
+    if (!response.ok) { setNote(body); setError(payload.error || t("Unable to send message")); return; }
+    if (payload.message) {
+      setMessages(current => current.some(message => message.id === payload.message?.id)
+        ? current
+        : [...current, payload.message as ChatMessage]);
+    }
+  };
+
+  const agree = async () => {
+    const token = getAuthToken();
+    if (!token || !selected) return;
+    setAgreementSaving(true);
+    setError("");
+    const response = await fetch(`/api/offers/${selected.offerId}/agreement`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    const payload = await response.json() as { deal?: { insufficientCredits?: boolean; commissionCents?: number; carrierBalanceCents?: number }; error?: string };
+    setAgreementSaving(false);
+    if (!response.ok) { setError(payload.error || t("Unable to update agreement")); return; }
+    await loadConversations();
+    if (payload.deal?.insufficientCredits && selected.role === "transporter") {
+      const missing = Math.max(0, Number(payload.deal.commissionCents || 0) - Number(payload.deal.carrierBalanceCents || 0));
+      setError(t("Add {amount} in credits to confirm this transport.", { amount: formatEuro(missing) }));
+    }
+  };
+
+  const agreementLabel = selected?.status === "confirmed"
+    ? t("Transport agreed")
+    : selected?.status === "rejected"
+      ? t("Another carrier was selected")
+      : selected?.role === "requester"
+        ? selected?.selectedByCustomer
+          ? selected.carrierAgreed ? t("Waiting for the carrier to add credits") : t("You are ready — waiting for the carrier")
+          : selected?.carrierAgreed ? t("Carrier is ready") : t("Discuss the details, then choose this carrier when ready")
+        : selected?.carrierAgreed
+          ? selected.selectedByCustomer ? t("Add credits to complete the agreement") : t("You are ready — waiting for the customer")
+          : selected?.selectedByCustomer ? t("Customer selected you") : t("Agree when the transport details are settled");
+  const canAgree = selected?.status === "pending" && (selected.role === "requester" ? !selected.selectedByCustomer : !selected.carrierAgreed);
+
+  return <section className="messages-page"><header><h1>{t("Messages")}</h1></header>{error && <p className="transport-list-message error">{error}</p>}{!conversations.length ? <div className="empty-transports"><h2>{t("No conversations yet")}</h2><p>{t("A conversation opens as soon as a carrier sends an offer.")}</p></div> : <div className="messages"><aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => setSelectedId(conversation.offerId)} key={conversation.offerId}><span className="avatar">{conversation.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span></button>)}</aside>{selected && <article><header><div><span className="avatar">{selected.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><span><b>{selected.otherPartyName}</b><small>{selected.itemName}</small></span></div><b className="offer-tag">{formatEuro(selected.priceCents)}</b></header><div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{selected.role === "transporter" && selected.status === "pending" && selected.selectedByCustomer && selected.carrierAgreed && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}</div><div className="thread">{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}{selected.status === "confirmed" && <div className="contact-note contact-revealed"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>{selected.status !== "rejected" ? <form onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")}>↑</button></form> : <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p>}</article>}</div>}</section>;
+}
 function CustomerProfile() { const { t } = useLanguage(); return <section className="profile-page"><p className="eyebrow">{t("Account")}</p><h1>{t("Your profile")}</h1><div className="profile-head"><span className="avatar customer large">AN</span><div><h2>Ana Novak</h2><p>ana.novak@example.com · +385 91 555 2400</p><button className="quiet-link">{t("Edit profile")}</button></div></div><div className="setting-list"><button>{t("Notifications")} <i>›</i></button><button>{t("Payment methods")} <i>›</i></button><button>{t("Help and safety")} <i>›</i></button></div></section>; }
 function Review({ onDone }: { onDone: () => void }) { const { t } = useLanguage(); const [rating, setRating] = useState(5); return <section className="review"><p className="eyebrow">{t("Transport complete")}</p><h1>{t("How did it go?")}</h1><div className="profile-head"><Avatar large /><div><h2>Mario M.</h2><p>{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p></div></div><div className="stars">{[1,2,3,4,5].map(n => <button className={n <= rating ? "on" : ""} onClick={() => setRating(n)} key={n}>★</button>)}</div><div className="tags">{["On time", "Great communication", "Careful handling", "Friendly"].map(x => <button key={x}>{t(x)}</button>)}</div><label><textarea placeholder={t("Add a short comment (optional)")} /></label><button className="button moss" onClick={onDone}>{t("Submit review")}</button></section>; }
 export function Tracking() { const { t } = useLanguage(); return <div className="tracking"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /><span>{t("Private delivery tracking")}</span></div></header><main><p className="eyebrow">{t("Bed slats")} · 12 km</p><h1>{t("Your delivery is on the way.")}</h1><div className="tracking-map"><RouteLine /><i>●</i><b className="map-pickup">IKEA Zagreb</b><b className="map-delivery">Trešnjevka</b></div><section className="eta"><div><Avatar /><span><b>Mario M.</b><small>Renault Master</small></span></div><div><span>{t("Estimated arrival")}</span><b>18:42</b></div></section><div className="transport-steps tracking-list"><div className="done"><b>✓</b><span><strong>{t("Picked up")}</strong><small>{t("17:28 — Mario has your item.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("In transit")}</strong><small>{t("18:04 — Heavy traffic. ETA updated by 12 minutes.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("We’ll let you know when it arrives.")}</small></span></div></div></main></div>; }
 function JobCard({ onOpen, compact = false }: { onOpen: () => void; compact?: boolean }) { const { t } = useLanguage(); return <article className={`job ${compact ? "compact" : ""}`}><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb <i>→</i> Trešnjevka</p><span>12 km</span><span>{t("Flexible")}</span><span>{t("No loading help required")}</span></div>{!compact && <b>3 {t("offers")}</b>}<button className="button dark short" onClick={onOpen}>{t("View job")}</button></article>; }
-export function CarrierWorkspace() { const loc = useLocation(); const nav = useNavigate(); const derive = () => loc.pathname.includes("offers") ? "offers" : loc.pathname.includes("active") ? "active" : loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("wallet") ? "wallet" : loc.pathname.includes("vehicles") ? "vehicles" : loc.pathname.includes("profile") ? "profile" : "jobs"; const [view, setView] = useState(derive()); const [job, setJob] = useState(false); const [offer, setOffer] = useState(false); const [stage, setStage] = useState(0); const [share, setShare] = useState(false); const go = (x: string) => { setView(x); nav(x === "jobs" ? "/carrier" : `/carrier/${x}`); }; const { t } = useLanguage(); return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !job && <section className="jobs"><div className="workspace-title"><div><p className="eyebrow">{t("Near Zagreb")}</p><h1>{t("Available transports")}</h1></div><div className="filters">{["Pickup area", "Destination", "Date", "Category"].map(x => <button key={x}>{t(x)}</button>)}</div></div><JobCard onOpen={() => setJob(true)} /><JobCard onOpen={() => setJob(true)} /><JobCard onOpen={() => setJob(true)} /></section>}{view === "jobs" && job && !offer && <JobDetail onBack={() => setJob(false)} onOffer={() => setOffer(true)} />}{view === "jobs" && offer && <MakeOffer onBack={() => setOffer(false)} onSend={() => { setOffer(false); go("offers"); }} />}{view === "offers" && <MyOffers onOpen={() => { go("jobs"); setJob(true); }} />}{view === "messages" && <Messages onAccept={() => go("active")} />}{view === "active" && <ActiveDelivery stage={stage} onNext={() => setStage(Math.min(stage + 1, 3))} share={share} onShare={() => setShare(!share)} />}{view === "wallet" && <Wallet />}{view === "profile" && <CarrierProfile onVehicles={() => go("vehicles")} />}{view === "vehicles" && <Vehicles onBack={() => go("profile")} />}</main></div>; }
+export function CarrierWorkspace() {
+  const loc = useLocation();
+  const nav = useNavigate();
+  const derive = () => loc.pathname.includes("offers") ? "offers" : loc.pathname.includes("active") ? "active" : loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("credits") ? "credits" : loc.pathname.includes("profile") ? "profile" : "jobs";
+  const [view, setView] = useState(derive());
+  const [selected, setSelected] = useState<MarketplaceTransport | null>(null);
+  const [makingOffer, setMakingOffer] = useState(false);
+  useEffect(() => { setView(derive()); setSelected(null); setMakingOffer(false); }, [loc.pathname]);
+  const go = (next: string, offerId?: string) => { setView(next); nav(next === "jobs" ? "/carrier" : `/carrier/${next}${offerId ? `?offer=${offerId}` : ""}`); };
+  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={setSelected} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onBack={() => setSelected(null)} onOffer={() => setMakingOffer(true)} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onBack={() => setMakingOffer(false)} onSent={offerId => go("messages", offerId)} />}{view === "offers" && <RealCarrierOffers onOpenChat={offerId => go("messages", offerId)} />}{view === "active" && <RealCarrierOffers confirmedOnly onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
+}
+
+function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => void }) {
+  const { language, t } = useLanguage();
+  const [transports, setTransports] = useState<MarketplaceTransport[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    void fetch("/api/marketplace/transports", { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
+      const payload = await response.json() as { transports?: MarketplaceTransport[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
+      setTransports(payload.transports || []);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoading(false));
+  }, [t]);
+  return <section className="jobs"><div className="workspace-title"><div><h1>{t("Available transports")}</h1></div></div>{loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : transports.length ? transports.map(request => <article className="job" key={request.id}><ItemImage label={request.itemName} /><div><h3>{request.itemName}</h3><p>{request.pickup.formatted} <i>→</i> {request.delivery.formatted}</p><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{request.weightKg} kg · {request.lengthCm} × {request.widthCm} cm</span></div><b>{request.offerCount} {t("offers")}</b><button className="button dark short" onClick={() => onOpen(request)}>{request.myOffer ? t("View offer") : t("View job")}</button></article>) : <div className="empty-transports"><h2>{t("No available transports")}</h2><p>{t("New customer requests will appear here.")}</p></div>}</section>;
+}
+
+function RealJobDetail({ request, onBack, onOffer }: { request: MarketplaceTransport; onBack: () => void; onOffer: () => void }) {
+  const { language, t } = useLanguage();
+  return <section className="job-detail"><button className="back" onClick={onBack}>← {t("Available transports")}</button><header><div><p className="eyebrow">{t(request.category)}</p><h1>{request.itemName}</h1><p>{request.pickup.formatted} <i>→</i> {request.delivery.formatted}</p></div><b>{request.distanceKm} km</b></header><div className="job-layout"><div><section><h2>{t("Transport details")}</h2>{request.description && <p>{request.description}</p>}<dl className="real-job-facts"><div><dt>{t("Customer")}</dt><dd>{request.requesterName}</dd></div><div><dt>{t("Dimensions")}</dt><dd>{request.lengthCm} × {request.widthCm} cm · {request.weightKg} kg</dd></div><div><dt>{t("Pickup")}</dt><dd>{request.pickup.formatted}</dd></div><div><dt>{t("Delivery")}</dt><dd>{request.delivery.formatted}</dd></div><div><dt>{t("Date")}</dt><dd>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</dd></div></dl></section></div><aside><p className="eyebrow">{request.myOffer ? t("Your offer") : t("Interested")}</p><h2>{request.myOffer ? formatEuro(request.myOffer.priceCents) : t("Make a clear offer.")}</h2>{request.myOffer ? <p>{t("You can update a pending offer below.")}</p> : <p>{t("Tell the customer your price and when you can do it.")}</p>}<button className="button moss full" onClick={onOffer}>{request.myOffer ? t("Update offer") : t("Make an offer")} <Arrow /></button></aside></div></section>;
+}
+
+function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransport; onBack: () => void; onSent: (offerId: string) => void }) {
+  const { t } = useLanguage();
+  const [price, setPrice] = useState(request.myOffer ? String(request.myOffer.priceCents / 100) : "");
+  const [date, setDate] = useState(request.myOffer?.availableDate || request.preferredDateFrom || "");
+  const [message, setMessage] = useState(request.myOffer?.message || "");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const token = getAuthToken();
+    const priceCents = Math.round(Number(price.replace(",", ".")) * 100);
+    if (!token || !Number.isFinite(priceCents) || priceCents <= 0 || !date) { setError(t("Enter a valid price and date")); return; }
+    setSaving(true); setError("");
+    const response = await fetch(`/api/transports/${request.id}/offers`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ priceCents, availableDate: date, message }) });
+    const payload = await response.json() as { offer?: TransportOffer; error?: string };
+    setSaving(false);
+    if (!response.ok) { setError(payload.error || t("Unable to save offer")); return; }
+    if (payload.offer) onSent(payload.offer.id);
+  };
+  return <section className="make-offer"><button className="back" onClick={onBack}>← {t("Job details")}</button><p className="eyebrow">{request.itemName} · {request.pickup.formatted} → {request.delivery.formatted}</p><h1>{t("Your offer")}</h1><form onSubmit={submit}><label>{t("Price")}<span className="price-input">€<input inputMode="decimal" value={price} onChange={event => setPrice(event.target.value)} placeholder="0.00" required /></span></label><label>{t("Available date")}<input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={event => setDate(event.target.value)} required /></label><label>{t("Message")} <em>{t("Optional")}</em><textarea value={message} onChange={event => setMessage(event.target.value)} placeholder={t("Tell the customer anything useful about your offer.")} /></label>{error && <p className="transport-list-message error">{error}</p>}<button className="button moss full" disabled={saving}>{saving ? t("Sending…") : t(request.myOffer ? "Update offer" : "Send offer")} <Arrow /></button></form></section>;
+}
+
+type CarrierOfferRow = TransportOffer & { itemName: string; pickup: string; delivery: string; requesterName: string };
+function RealCarrierOffers({ confirmedOnly = false, onOpenChat }: { confirmedOnly?: boolean; onOpenChat?: (offerId: string) => void }) {
+  const { language, t } = useLanguage();
+  const [offers, setOffers] = useState<CarrierOfferRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    void fetch(`/api/offers${confirmedOnly ? "?status=confirmed" : ""}`, { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
+      const payload = await response.json() as { offers?: CarrierOfferRow[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to load offers"));
+      setOffers(payload.offers || []);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load offers"))).finally(() => setLoading(false));
+  }, [confirmedOnly, t]);
+  return <section className="my-offers"><div className="workspace-title"><div><h1>{t(confirmedOnly ? "Active transports" : "My offers")}</h1></div></div>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : offers.length ? offers.map(offer => <article key={offer.id}><ItemImage label={offer.itemName} /><div><h3>{offer.itemName}</h3><p>{offer.pickup} → {offer.delivery}</p><small>{offer.requesterName} · {formatTransportDates(offer.availableDate, null, language)}</small></div><strong>{formatEuro(offer.priceCents)}</strong><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.status === "rejected" ? "Not selected" : offer.selectedByCustomer ? "Customer selected you" : offer.carrierAgreed ? "Waiting for customer" : "Chat open")}</span>{onOpenChat && <button className="button dark short" onClick={() => onOpenChat(offer.id)}>{t("Open chat")}</button>}</article>) : <div className="empty-transports"><h2>{t(confirmedOnly ? "No active transports" : "No offers yet")}</h2><p>{t(confirmedOnly ? "Mutually agreed transports will appear here." : "Offers you send to customers will appear here.")}</p></div>}</section>;
+}
+
+function CarrierProfileEditor() {
+  const { t } = useLanguage();
+  const [profile, setProfile] = useState<CarrierProfileData | null>(null);
+  const [companyName, setCompanyName] = useState("");
+  const [bio, setBio] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    void fetch("/api/carrier-profile", { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
+      const payload = await response.json() as { profile?: CarrierProfileData; error?: string };
+      if (!response.ok || !payload.profile) throw new Error(payload.error || t("Unable to load profile"));
+      setProfile(payload.profile); setCompanyName(payload.profile.companyName); setBio(payload.profile.bio);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load profile")));
+  }, [t]);
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const token = getAuthToken();
+    if (!token) return;
+    const form = new FormData();
+    form.set("companyName", companyName); form.set("bio", bio);
+    if (files.length) { form.set("replaceImages", "true"); files.forEach(file => form.append("images", file)); }
+    const response = await fetch("/api/carrier-profile", { method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: form });
+    const payload = await response.json() as { profile?: CarrierProfileData; error?: string };
+    if (!response.ok || !payload.profile) { setError(payload.error || t("Unable to save profile")); return; }
+    setProfile(payload.profile); setFiles([]); setError(""); setMessage(t("Profile saved"));
+  };
+  return <section className="carrier-profile real-carrier-profile"><div className="profile-head"><span className="avatar large">{profile?.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || ""}</span><div><p className="eyebrow">{t("Transporter profile")}</p><h1>{profile?.carrierName || t("Your profile")}</h1><p>{profile?.completedTransports || 0} {t("completed transports")}</p></div></div><form onSubmit={save}><label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} maxLength={150} required /></label><label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} maxLength={1500} /></label><label>{t("Business images")} <span className="field-hint">{t("Up to 3 images, 10 MB each")}</span><input type="file" accept="image/*" multiple onChange={event => { const selectedFiles = Array.from(event.target.files || []).slice(0, 3); setFiles(selectedFiles); }} /></label><div className="carrier-image-grid">{files.length ? files.map(file => <FilePreview file={file} key={`${file.name}-${file.lastModified}`} />) : profile?.imageIds.map(id => <PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} key={id} />)}</div>{error && <p className="transport-list-message error">{error}</p>}{message && <p className="auth-message success">{message}</p>}<button className="button moss" type="submit">{t("Save profile")}</button></form></section>;
+}
 function JobDetail({ onBack, onOffer }: { onBack: () => void; onOffer: () => void }) { const { t } = useLanguage(); return <section className="job-detail"><button className="back" onClick={onBack}>← {t("Available transports")}</button><header><div><p className="eyebrow">{t("Furniture")} · {t("Flexible")}</p><h1>{t("Bed slats")}</h1><p>IKEA Zagreb <i>→</i> Trešnjevka</p></div><b>12 km</b></header><div className="job-layout"><div><div className="detail-map"><RouteLine /><span>IKEA Zagreb</span><span>Trešnjevka</span></div><section><h2>{t("What you’re moving")}</h2><p>{t("Bed slats, already packed. No loading help required.")}</p><div className="photo-row"><ItemImage type="photo" /><ItemImage type="photo" /></div></section><section className="info-split"><div><span>{t("Pickup")}</span><b>{t("Flexible · Ground floor")}</b></div><div><span>{t("Delivery")}</span><b>{t("Trešnjevka · Elevator available")}</b></div></section></div><aside><p className="eyebrow">{t("Interested")}</p><h2>{t("Make a clear offer.")}</h2><p>{t("Tell the customer your price and when you can do it.")}</p><button className="button moss full" onClick={onOffer}>{t("Make an offer")} <Arrow /></button></aside></div><button className="button moss mobile-sticky" onClick={onOffer}>{t("Make an offer")}</button></section>; }
 function MakeOffer({ onBack, onSend }: { onBack: () => void; onSend: () => void }) { const { t } = useLanguage(); return <section className="make-offer"><button className="back" onClick={onBack}>← {t("Job details")}</button><p className="eyebrow">{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p><h1>{t("Your offer")}</h1><div><label className="price-input">€<input defaultValue="32" /></label><Picker label={t("Pickup availability")} defaultValue="today" options={[{ value: "today", label: <>{t("Today")}, 17:00–19:00</> }, { value: "tomorrow", label: t("Tomorrow, 10:00–12:00") }]} ariaLabel={t("Pickup availability")} /><Picker label={t("Delivery estimate")} defaultValue="45" options={[{ value: "45", label: t("Within 45 minutes of pickup") }, { value: "60", label: t("Within 1 hour of pickup") }]} ariaLabel={t("Delivery estimate")} /><Picker label={t("Vehicle")} defaultValue="master" options={[{ value: "master", label: <>Renault Master · {t("Large van")}</> }]} ariaLabel={t("Vehicle")} /><label>{t("Message")} <em>{t("Optional")}</em><textarea defaultValue={t("I’m already driving through this area tomorrow afternoon.")} /></label><button className="button moss full" onClick={onSend}>{t("Send offer")} <Arrow /></button></div></section>; }
 function MyOffers({ onOpen }: { onOpen: () => void }) { const { t } = useLanguage(); return <section className="my-offers"><div className="workspace-title"><div><p className="eyebrow">{t("Keep an eye on it")}</p><h1>{t("My offers")}</h1></div><div className="tabs"><button className="selected">{t("Pending")}</button><button>{t("Accepted")}</button><button>{t("Past")}</button></div></div><article><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb → Trešnjevka</p></div><strong>€32</strong><span className="status">{t("Waiting for customer")}</span><button className="button dark short" onClick={onOpen}>{t("Open")}</button></article></section>; }
 function ActiveDelivery({ stage, onNext, share, onShare }: { stage: number; onNext: () => void; share: boolean; onShare: () => void }) { const { t } = useLanguage(); const title = ["Heading to pickup", "At pickup", "Item collected", "On the way"][stage]; const action = ["I’ve arrived", "Item collected", "Start delivery", "Mark as delivered"][stage]; return <section className="active-delivery"><p className="eyebrow">{t("Active transport")}</p><h1>{t(title)}</h1><div className="active-meta"><div><span>{t("Customer")}</span><b>Ana Novak</b><a href="tel:+385915552400">+385 91 555 2400</a></div><div><span>{t("Route")}</span><b>IKEA Zagreb → Trešnjevka</b><button>{t("Open navigation")}</button></div></div><div className="active-map"><RouteLine /><i>●</i></div><div className="share"><div><b>{t("Share live location with customer")}</b><p>{t("Your customer will receive a private tracking link until delivery is completed.")}</p></div><button className={share ? "switch on" : "switch"} onClick={onShare}><span /></button></div><div className="update-buttons">{["Traffic", "Pickup delay", "Customer unavailable", "Other"].map(x => <button key={x}>{t(x)}</button>)}</div><button className="button moss delivery-action" onClick={onNext}>{t(action)}</button></section>; }
-function Wallet() { const { t } = useLanguage(); const [open, setOpen] = useState(false); const [amount, setAmount] = useState("50"); return <section className="wallet"><p className="eyebrow">{t("Your funds")}</p><h1>{t("Balance")}</h1><strong>€42.50</strong><button className="button moss" onClick={() => setOpen(!open)}>{t("Add funds")} <Arrow /></button>{open && <div className="checkout"><h2>{t("Add funds")}</h2><div>{["10", "25", "50", "100"].map(x => <button className={amount === x ? "selected" : ""} onClick={() => setAmount(x)} key={x}>€{x}</button>)}<label>€<input value={amount} onChange={e => setAmount(e.target.value)} /></label></div><Picker label={t("Payment method")} defaultValue="visa" options={[{ value: "visa", label: t("Visa ending in 2400") }, { value: "new", label: t("New card") }]} ariaLabel={t("Payment method")} /><button className="button dark full">{t("Add funds")} €{amount}</button></div>}<article className="activity"><h2>{t("Recent activity")}</h2><div><span><b>€50.00</b><small>{t("Balance top-up")}</small></span><time>{t("Today")}</time></div><div><span><b>− €4.80</b><small>{t("Commission — Bed slats transport")}</small></span><time>{t("Aug 18")}</time></div></article></section>; }
+function Wallet() {
+  const { language, t } = useLanguage();
+  const [searchParams] = useSearchParams();
+  const [account, setAccount] = useState<CreditAccount | null>(null);
+  const [open, setOpen] = useState(searchParams.get("checkout") !== "success");
+  const [amount, setAmount] = useState("25");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const checkoutStatus = searchParams.get("checkout");
+  const load = useCallback(async () => {
+    const token = getAuthToken();
+    if (!token) return;
+    const response = await fetch("/api/credits", { headers: { Authorization: `Bearer ${token}` } });
+    const payload = await response.json() as { account?: CreditAccount; error?: string };
+    if (!response.ok || !payload.account) throw new Error(payload.error || t("Unable to load credits"));
+    setAccount(payload.account);
+    setError("");
+  }, [t]);
+  useEffect(() => {
+    void load().catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load credits"))).finally(() => setLoading(false));
+  }, [load, t]);
+  useEffect(() => {
+    if (checkoutStatus !== "success") return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void load();
+      if (attempts >= 10) window.clearInterval(timer);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [checkoutStatus, load]);
+  const checkout = async () => {
+    const token = getAuthToken();
+    const amountCents = Math.round(Number(amount.replace(",", ".")) * 100);
+    if (!token || !Number.isFinite(amountCents) || amountCents < 500 || amountCents > 50_000) {
+      setError(t("Choose an amount between €5 and €500"));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/credits/checkout", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ amountCents }) });
+    const payload = await response.json() as { url?: string; error?: string };
+    if (!response.ok || !payload.url) {
+      setSaving(false);
+      setError(payload.error || t("Unable to start checkout"));
+      return;
+    }
+    window.location.assign(payload.url);
+  };
+  return <section className="wallet"><p className="eyebrow">{t("Transporter credits")}</p><h1>{t("Balance")}</h1><strong>{loading ? "—" : formatEuro(account?.balanceCents || 0)}</strong><p className="credit-explanation">{t("When a transport is confirmed by both sides, 5% of its agreed price is deducted from your credits.")}</p>{checkoutStatus === "success" && <p className="auth-message success">{t("Payment completed. Your balance will update as soon as Stripe confirms it.")}</p>}{checkoutStatus === "cancelled" && <p className="auth-message">{t("Checkout was cancelled. No credits were added.")}</p>}{error && <p className="transport-list-message error">{error}</p>}<button className="button moss" onClick={() => setOpen(current => !current)}>{t("Add credits")} <Arrow /></button>{open && <div className="checkout"><h2>{t("Add credits")}</h2><div>{["10", "25", "50", "100"].map(value => <button type="button" className={amount === value ? "selected" : ""} onClick={() => setAmount(value)} key={value}>€{value}</button>)}<label>€<input inputMode="decimal" value={amount} onChange={event => setAmount(event.target.value)} aria-label={t("Custom amount")} /></label></div><button type="button" className="button dark full" disabled={saving || !account?.stripeConfigured} onClick={() => void checkout()}>{saving ? t("Opening Stripe…") : `${t("Continue to Stripe")} · €${amount}`}</button>{!account?.stripeConfigured && !loading && <p className="field-hint">{t("Stripe needs to be configured before credits can be purchased.")}</p>}</div>}<article className="activity"><h2>{t("Recent activity")}</h2>{account?.transactions.length ? account.transactions.map(transaction => <div key={transaction.id}><span><b>{transaction.amountCents > 0 ? "+ " : "− "}{formatEuro(Math.abs(transaction.amountCents))}</b><small>{t(transaction.description)}</small></span><time>{new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(transaction.createdAt))}</time></div>) : <p className="transport-list-message">{t("No credit activity yet")}</p>}</article></section>;
+}
 function CarrierProfile({ onVehicles }: { onVehicles: () => void }) { const { t } = useLanguage(); return <section className="carrier-profile"><div className="profile-head"><Avatar large /><div><p className="eyebrow">{t("Verified carrier")}</p><h1>Mario M.</h1><p>★ 4.9 · 127 {t("completed transports")}</p></div></div><p>{t("I’m an independent carrier in Zagreb. I care about being on time, communicating clearly, and delivering everything in the condition it left.")}</p><section><header><h2>{t("Vehicles")}</h2><button className="quiet-link" onClick={onVehicles}>{t("Manage")}</button></header><div className="vehicle">▰ <div><b>Renault Master</b><span>{t("Large Van")} · 3.2m {t("cargo length")} · 1,350kg {t("payload")}</span></div></div></section><section><h2>{t("Reviews")}</h2><blockquote>“{t("Mario was early, thoughtful and took great care with the furniture.")}”<footer>— Petra, {t("verified customer")}</footer></blockquote></section></section>; }
 function Vehicles({ onBack }: { onBack: () => void }) { const { t } = useLanguage(); return <section className="vehicles"><button className="back" onClick={onBack}>← {t("Carrier profile")}</button><header><div><p className="eyebrow">{t("Your equipment")}</p><h1>{t("Vehicles")}</h1></div><button className="button dark short">{t("Add vehicle")}</button></header><div className="vehicle manager">▰ <div><b>Renault Master</b><span>{t("Large Van")}</span><small>3.2m {t("cargo length")} · 1.7m {t("width")} · 1,350kg {t("payload")}</small></div><p><button>{t("Edit")}</button><button className="danger">{t("Remove")}</button></p></div></section>; }
