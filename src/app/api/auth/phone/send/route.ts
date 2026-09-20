@@ -22,6 +22,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Phone number accepted" });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Enter a valid international phone number" }, { status: 400 });
-    return NextResponse.json({ error: "Unable to send phone verification code" }, { status: 500 });
+    return NextResponse.json({ error: "We couldn't send a verification code right now. Please try again in a moment." }, { status: 500 });
   }
 }

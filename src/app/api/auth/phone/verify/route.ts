@@ -42,6 +42,6 @@ export async function POST(request: Request) {
       name: error instanceof Error ? error.name : "UnknownError",
       code: error && typeof error === "object" && "code" in error ? String(error.code) : undefined,
     });
-    return NextResponse.json({ error: "Phone verification is invalid or expired" }, { status: 401 });
+    return NextResponse.json({ error: "We couldn't verify your phone number right now. Please try again in a moment." }, { status: 401 });
   }
 }

@@ -52,28 +52,22 @@ type AuthConfig = {
   firebase?: ({ enabled: false; testMode: boolean } | ({ enabled: true } & FirebasePhoneConfig));
 };
 
-function firebasePhoneError(error: unknown, translate: (key: string) => string) {
+function firebasePhoneError(error: unknown, translate: (key: string) => string, action: "send" | "verify") {
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
   const messages: Record<string, string> = {
-    "auth/operation-not-allowed": "Phone sign-in is disabled for this Firebase project. Enable the Phone provider in Firebase Authentication.",
-    "auth/unauthorized-domain": "This website domain is not authorized for phone sign-in in Firebase Authentication.",
-    "auth/invalid-api-key": "The Firebase API key is invalid for this environment. Check the Firebase web app configuration.",
-    "auth/app-not-authorized": "This Firebase web app is not authorized to use phone sign-in. Check its API key and project settings.",
     "auth/invalid-phone-number": "Enter a valid mobile number for the selected country",
     "auth/missing-phone-number": "Enter a valid mobile number for the selected country",
     "auth/invalid-verification-code": "The verification code is incorrect",
     "auth/invalid-credential": "The verification code is invalid or expired. Request a new code and try again.",
     "auth/code-expired": "The verification code has expired. Send a new code.",
-    "auth/too-many-requests": "Too many attempts. Please wait before trying again.",
-    "auth/quota-exceeded": "The SMS verification limit has been reached. Please try again later.",
-    "auth/billing-not-enabled": "Phone sign-in is not enabled for this Firebase project. Check the project's Authentication and billing settings.",
-    "auth/captcha-check-failed": "The security check failed. Please try again.",
-    "auth/invalid-app-credential": "The security check expired. Please try again.",
+    "auth/too-many-requests": "Too many attempts. Please wait a few minutes before trying again.",
   };
   if (messages[code]) return translate(messages[code]);
-  // Keep an unrecognized Firebase error code visible so failures don't all
-  // collapse into the same generic message while diagnosing project changes.
-  return `${translate("Unable to verify phone number")}${code ? ` (${code})` : ""}`;
+  // Firebase setup, quota, security-check, and unknown errors are intentionally
+  // kept out of the UI. Detailed diagnostics belong in server/client logs.
+  return translate(action === "send"
+    ? "We couldn't send a verification code right now. Please try again in a moment."
+    : "We couldn't verify your phone number right now. Please try again in a moment.");
 }
 
 function isValidEmail(value: string) {
@@ -633,13 +627,12 @@ export function Registration() {
       const authorizationToken = googleRegistrationToken || window.localStorage.getItem("auth_token") || "";
       const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
       const configPayload = await configResponse.json() as AuthConfig;
-      if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error(t("Phone verification is not configured"));
+      if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error("Phone verification unavailable");
       const phoneNumber = normalizedPhoneNumber(country, localNumber);
       if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
 
       const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ phoneNumber }) });
-      const validationPayload = await validationResponse.json() as { error?: string };
-      if (!validationResponse.ok) throw new Error(validationPayload.error || t("Unable to send phone verification code"));
+      if (!validationResponse.ok) throw new Error("Phone verification unavailable");
 
       const auth = getFirebasePhoneAuth(configPayload.firebase);
       auth.languageCode = language;
@@ -653,7 +646,7 @@ export function Registration() {
       setStage("phone-code");
       setMessage(configPayload.firebase.testMode ? "" : t("We sent a six-digit code to your phone."));
     } catch (error) {
-      setAuthError(error instanceof Error && !('code' in error) ? error.message : firebasePhoneError(error, t));
+      setAuthError(firebasePhoneError(error, t, "send"));
       confirmationResult.current = null;
     } finally {
       recaptchaVerifier.current?.clear();
@@ -672,15 +665,19 @@ export function Registration() {
       const firebaseIdToken = await credential.user.getIdToken();
       const authorizationToken = googleRegistrationToken || window.localStorage.getItem("auth_token") || "";
       const response = await fetch("/api/auth/phone/verify", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ firebaseIdToken, ...(googleRegistrationToken ? { role, firstName, lastName } : {}) }) });
-      const payload = await response.json() as { token?: string; user?: AuthenticatedUser; error?: string };
-      if (!response.ok || !payload.user) throw new Error(payload.error || t("Unable to verify phone number"));
+      const payload = await response.json() as { token?: string; user?: AuthenticatedUser };
+      if (response.status === 409) {
+        setAuthError(t("This phone number is already linked to an account."));
+        return;
+      }
+      if (!response.ok || !payload.user) throw new Error("Phone verification unavailable");
       const sessionToken = payload.token || window.localStorage.getItem("auth_token") || "";
       if (payload.token) window.localStorage.setItem("auth_token", payload.token);
       if (firebaseAuth.current) await signOut(firebaseAuth.current);
       confirmationResult.current = null;
       setGoogleRegistrationToken("");
       await syncPhotosAndNavigate(sessionToken, payload.user);
-    } catch (error) { setAuthError(error instanceof Error && !('code' in error) ? error.message : firebasePhoneError(error, t)); }
+    } catch (error) { setAuthError(firebasePhoneError(error, t, "verify")); }
     finally { setSubmitting(false); }
   };
 
