@@ -37,6 +37,11 @@ export async function POST(request: Request) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Phone verification token is required" }, { status: 400 });
     if (error instanceof Error && error.message.includes("unique")) return NextResponse.json({ error: "This phone number is already used by another account" }, { status: 409 });
     if (error instanceof Error && error.message.includes("Google registration")) return NextResponse.json({ error: error.message }, { status: 401 });
+    // Log only error metadata, never the Firebase ID token or phone number.
+    console.error("Phone verification token rejected", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      code: error && typeof error === "object" && "code" in error ? String(error.code) : undefined,
+    });
     return NextResponse.json({ error: "Phone verification is invalid or expired" }, { status: 401 });
   }
 }

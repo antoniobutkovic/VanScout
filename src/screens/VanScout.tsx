@@ -55,16 +55,25 @@ type AuthConfig = {
 function firebasePhoneError(error: unknown, translate: (key: string) => string) {
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
   const messages: Record<string, string> = {
+    "auth/operation-not-allowed": "Phone sign-in is disabled for this Firebase project. Enable the Phone provider in Firebase Authentication.",
+    "auth/unauthorized-domain": "This website domain is not authorized for phone sign-in in Firebase Authentication.",
+    "auth/invalid-api-key": "The Firebase API key is invalid for this environment. Check the Firebase web app configuration.",
+    "auth/app-not-authorized": "This Firebase web app is not authorized to use phone sign-in. Check its API key and project settings.",
     "auth/invalid-phone-number": "Enter a valid mobile number for the selected country",
     "auth/missing-phone-number": "Enter a valid mobile number for the selected country",
     "auth/invalid-verification-code": "The verification code is incorrect",
+    "auth/invalid-credential": "The verification code is invalid or expired. Request a new code and try again.",
     "auth/code-expired": "The verification code has expired. Send a new code.",
     "auth/too-many-requests": "Too many attempts. Please wait before trying again.",
     "auth/quota-exceeded": "The SMS verification limit has been reached. Please try again later.",
+    "auth/billing-not-enabled": "Phone sign-in is not enabled for this Firebase project. Check the project's Authentication and billing settings.",
     "auth/captcha-check-failed": "The security check failed. Please try again.",
     "auth/invalid-app-credential": "The security check expired. Please try again.",
   };
-  return translate(messages[code] || "Unable to verify phone number");
+  if (messages[code]) return translate(messages[code]);
+  // Keep an unrecognized Firebase error code visible so failures don't all
+  // collapse into the same generic message while diagnosing project changes.
+  return `${translate("Unable to verify phone number")}${code ? ` (${code})` : ""}`;
 }
 
 function isValidEmail(value: string) {
