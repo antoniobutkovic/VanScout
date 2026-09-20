@@ -161,7 +161,9 @@ function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: {
     window.google.accounts.id.renderButton(container, {
       type: "standard",
       theme: "outline",
-      size: "large",
+      // Google personalizes large buttons for returning sessions; medium keeps
+      // the same generic sign-in button regardless of the user's Google state.
+      size: "medium",
       text: "continue_with",
       shape: "rectangular",
       logo_alignment: "center",
