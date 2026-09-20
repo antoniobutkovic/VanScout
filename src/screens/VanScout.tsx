@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import Image from "next/image";
 import { Realtime, type TokenRequest } from "ably";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { RecaptchaVerifier, signInWithPhoneNumber, signOut, type Auth, type ConfirmationResult } from "firebase/auth";
@@ -28,7 +29,7 @@ const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Review"
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function Arrow() { return null; }
-function Mark() { return <Link className="brand" to="/">VanScout<span>.</span></Link>; }
+function Mark() { return <Link className="brand" to="/" aria-label="VanScout home"><Image src="/vanscout-logo.png" alt="VanScout" width={2172} height={724} /></Link>; }
 function RouteLine({ small = false }: { small?: boolean }) { return <span className={`route-line ${small ? "small" : ""}`}><i /><b /><i /></span>; }
 function TransportRoute({ from, to, short = true, className = "" }: { from: string; to: string; short?: boolean; className?: string }) {
   const { t } = useLanguage();

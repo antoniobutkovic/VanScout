@@ -5,6 +5,9 @@ import "maplibre-gl/dist/maplibre-gl.css";
 export const metadata: Metadata = {
   title: "VanScout",
   description: "Request or offer transport services without the hassle.",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
