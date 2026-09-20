@@ -112,7 +112,7 @@ function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: {
     let cancelled = false;
     const loadGoogleButton = async () => {
       try {
-        const configResponse = await fetch("/api/auth/config");
+        const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
         const config = await configResponse.json() as { google?: { enabled?: boolean; clientId?: string | null } };
         if (!config.google?.enabled || !config.google.clientId) {
           return;
@@ -622,7 +622,7 @@ export function Registration() {
     setSubmitting(true); setPhoneError(""); setAuthError(""); setMessage("");
     try {
       const authorizationToken = googleRegistrationToken || window.localStorage.getItem("auth_token") || "";
-      const configResponse = await fetch("/api/auth/config");
+      const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
       const configPayload = await configResponse.json() as AuthConfig;
       if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error(t("Phone verification is not configured"));
       const phoneNumber = normalizedPhoneNumber(country, localNumber);
