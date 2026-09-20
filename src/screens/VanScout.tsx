@@ -280,11 +280,43 @@ function useHasMessages(kind?: "customer" | "carrier") {
   return hasMessages;
 }
 
+function useHasUnreadOffers(enabled: boolean) {
+  const [hasUnreadOffers, setHasUnreadOffers] = useState(false);
+  useEffect(() => {
+    if (!enabled) {
+      setHasUnreadOffers(false);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const token = getAuthToken();
+      if (!token) {
+        if (!cancelled) setHasUnreadOffers(false);
+        return;
+      }
+      try {
+        const response = await fetch("/api/transports?status=all", { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
+        const payload = await response.json() as { transports?: TransportRequest[] };
+        if (!cancelled && response.ok) setHasUnreadOffers((payload.transports || []).some(transport => transport.hasUnreadOffers));
+      } catch {
+        // Keep the last known dot state during temporary connection failures.
+      }
+    };
+    void load();
+    const handleOffersRead = () => void load();
+    window.addEventListener("vanscout-offers-read", handleOffersRead);
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => { cancelled = true; window.removeEventListener("vanscout-offers-read", handleOffersRead); window.clearInterval(timer); };
+  }, [enabled]);
+  return hasUnreadOffers;
+}
+
 function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: string }) {
   const { t } = useLanguage();
   const hasMessages = useHasMessages(kind);
+  const hasUnreadOffers = useHasUnreadOffers(kind === "customer");
   const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["active", "Active", "/carrier/active"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]];
-  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="message-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="message-indicator" aria-hidden="true" />}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
+  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}{hasUnreadOffers && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
 }
 function Footer() { const { t } = useLanguage(); return <footer className="footer"><div className="footer-brand"><Mark /><strong>Contact</strong><a href="mailto:info@van-scout.com">info@van-scout.com</a></div><div className="footer-legal"><strong>{t("Legal information")}</strong><Link to="/politika-privatnosti">{t("Privacy policy")}</Link><Link to="/politika-o-kolacicima">{t("Cookie policy")}</Link><Link to="/uvjeti-koristenja">{t("Terms of use")}</Link><Link to="/impressum">{t("Impressum")}</Link></div><small className="footer-copyright">{t("© 2026 VanScout. All rights reserved.")}</small></footer>; }
 function ItemImage({ type = "bed", label }: { type?: "bed" | "photo"; label?: string }) { const { t } = useLanguage(); return <div className={`item-image ${type}`}><span>{label || (type === "bed" ? <>{t("Bed")}<br />{t("slats")}</> : t("Photo"))}</span></div>; }
@@ -1042,14 +1074,16 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
   const [offers, setOffers] = useState<TransportOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const hasOffers = !loading && offers.length > 0;
   const loadOffers = async () => {
     const token = getAuthToken();
     if (!token) return;
     try {
-      const response = await fetch(`/api/transports/${request.id}/offers`, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`/api/transports/${request.id}/offers`, { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
       const payload = await response.json() as { offers?: TransportOffer[]; error?: string };
       if (!response.ok) throw new Error(payload.error || t("Unable to load offers"));
       setOffers(payload.offers || []);
+      window.dispatchEvent(new Event("vanscout-offers-read"));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t("Unable to load offers"));
     } finally { setLoading(false); }
@@ -1058,20 +1092,20 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
   return <section className="job-detail customer-job-detail">
     <div className="job-detail-actions"><button className="back detail-back" onClick={onBack}><span aria-hidden="true">←</span><span>{t("Your transports")}</span></button></div>
     <TransportDetailHeader request={request} />
-    <div className="job-layout customer-detail-layout">
+    <div className={`job-layout customer-detail-layout ${hasOffers ? "with-offers" : "no-offers"}`}>
       <TransportDetails request={request} />
-      <aside className="customer-offers-panel">
+      {hasOffers && <aside className="customer-offers-panel">
         <div className="offers-heading"><div><h2>{t("Offers")}</h2><p>{t("Chat with carriers before choosing who is ready for the transport.")}</p></div></div>
-        {error && <p className="transport-list-message error">{error}</p>}
-        {loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : offers.length ? <div className="customer-offer-list">{offers.map(offer => <article className="offer live-offer customer-live-offer" key={offer.id}>
+        <div className="customer-offer-list">{offers.map(offer => <article className="offer live-offer customer-live-offer" key={offer.id}>
           <div className="offer-person"><b>{offer.companyName || offer.carrierName}</b><span>{offer.carrierName} · {offer.completedTransports} {t("completed transports")}</span></div>
           <div className="offer-time"><b>{formatTransportDates(offer.availableDate, null, language)}</b><span>{t("Available date")}</span></div>
           {offer.message && <p>“{offer.message}”</p>}
           <div className="price"><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} /></div>
           <div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="button dark short" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div>
-        </article>)}</div> : <div className="empty-offers"><h3>{t("No offers yet")}</h3><p>{t("Your request is live. Carriers can now review it and send an offer.")}</p></div>}
-      </aside>
+        </article>)}</div>
+      </aside>}
     </div>
+    {error && <p className="transport-list-message error" role="alert">{error}</p>}
   </section>;
 }
 function OfferCard({ offer, onProfile, onMessage, onAccept }: { offer: Offer; onProfile: () => void; onMessage: () => void; onAccept: () => void }) { const { t } = useLanguage(); return <article className="offer"><button onClick={onProfile}><Avatar offer={offer} /></button><div className="offer-person"><button onClick={onProfile}>{offer.name}</button><span>★ {offer.rating} · {t(offer.jobs)}</span><small>{offer.vehicle}</small></div><div className="offer-time"><b>{t(offer.time)}</b><span>{t("Available window")}</span></div><p>“{t(offer.note)}”</p><div className="price"><b>{offer.price}</b><span>{t("all in")}</span></div><div className="offer-actions"><button onClick={onMessage}>{t("Message")}</button><button onClick={onProfile}>{t("View profile")}</button><button className="button moss short" onClick={onAccept}>{t("Accept")}</button></div></article>; }

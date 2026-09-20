@@ -117,6 +117,13 @@ export async function createOrUpdateOffer(carrier: AppUser, transportId: string,
 export async function listOffersForCustomer(transportId: string, requesterId: string) {
   await ensureDatabaseSchema();
   const sql = sqlClient();
+  await sql`
+    INSERT INTO vanscout_transport_offer_reads (transport_request_id, read_at)
+    SELECT id, NOW()
+    FROM vanscout_transport_requests
+    WHERE id = ${transportId} AND requester_id = ${requesterId}
+    ON CONFLICT (transport_request_id) DO UPDATE SET read_at = EXCLUDED.read_at
+  `;
   const rows = await sql.query(`
     SELECT offer.id AS offer_id, offer.transport_request_id, offer.carrier_id, carrier.name AS carrier_name,
       profile.company_name, offer.price_cents, offer.vat_included, offer.available_date, offer.message,

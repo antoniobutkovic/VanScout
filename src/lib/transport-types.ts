@@ -26,6 +26,7 @@ export type TransportRequest = {
   createdAt: string;
   updatedAt: string;
   imageIds: string[];
+  hasUnreadOffers?: boolean;
 };
 
 export type CreateTransportRequest = Omit<TransportRequest, "id" | "status" | "distanceKm" | "createdAt" | "updatedAt" | "imageIds">;

@@ -173,6 +173,12 @@ async function ensureSchema() {
       await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS vat_included BOOLEAN NOT NULL DEFAULT TRUE`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_transport_idx ON vanscout_transport_offers (transport_request_id, created_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_carrier_idx ON vanscout_transport_offers (carrier_id, created_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_transport_offer_reads (
+          transport_request_id TEXT PRIMARY KEY REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,
+          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
       // Older databases may have been created before the composite foreign key
       // was introduced. `CREATE TABLE IF NOT EXISTS` does not update an
       // existing table, so make the referenced key available before creating

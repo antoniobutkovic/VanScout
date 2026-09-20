@@ -37,7 +37,7 @@ p { line-height: 1.5; color: var(--muted); }
 .topbar nav { display: flex; gap: 29px; align-items: center; font-size: 14px; font-weight: 600; }
 .topbar nav a { position: relative; color: #4c514a; }
 .topbar nav a:hover, .topbar nav a.active { color: var(--ink); }
-.message-indicator { position: absolute; top: -3px; right: -9px; width: 7px; height: 7px; border-radius: 50%; background: var(--clay); }
+.notification-indicator { position: absolute; top: -3px; right: -9px; width: 7px; height: 7px; border-radius: 50%; background: var(--clay); }
 .nav-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
 .topbar:not(.app-topbar) > .nav-actions { grid-column: 3; justify-self: end; }
 .picker-field { position: relative; width: 100%; margin-top: 20px; }
@@ -536,6 +536,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 
 .job-layout { display: grid; grid-template-columns: 1fr 270px; gap: 45px; }
 .customer-detail-layout { grid-template-columns: minmax(0, 1fr) minmax(320px, .72fr); align-items: start; }
+.customer-detail-layout.no-offers { grid-template-columns: minmax(0, 1fr); }
 .job-layout.single-column { grid-template-columns: 1fr; }
 .detail-map { display: grid; grid-template-columns: max-content 1fr max-content; align-items: center; gap: 12px; padding: 28px; font-size: 12px; font-weight: 750; }
 .detail-map .route-line { position: relative; z-index: 1; }

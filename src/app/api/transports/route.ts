@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   const user = await authenticatedUser(request);
   if (!user || user.role !== "requester") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const requestedFilter = new URL(request.url).searchParams.get("status");
-  const filter = requestedFilter === "completed" ? "completed" : "active";
+  const filter = requestedFilter === "completed" ? "completed" : requestedFilter === "all" ? "all" : "active";
   try {
     return NextResponse.json({ transports: await listTransportRequests(user.id, filter) });
   } catch {

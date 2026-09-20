@@ -45,33 +45,31 @@ export function toTransportRequest(row: Record<string, unknown>): TransportReque
     createdAt: new Date(String(row.created_at)).toISOString(),
     updatedAt: new Date(String(row.updated_at)).toISOString(),
     imageIds: Array.isArray(row.image_ids) ? row.image_ids.map(String) : [],
+    hasUnreadOffers: Boolean(row.has_unread_offers),
   };
 }
 
-export async function listTransportRequests(requesterId: string, filter: "active" | "completed") {
+export async function listTransportRequests(requesterId: string, filter: "active" | "completed" | "all") {
   await ensureDatabaseSchema();
   const sql = sqlClient();
-  const rows = filter === "completed"
-    ? await sql`
-        SELECT id, category, item_name, description, length_cm, width_cm, weight_kg,
-          pickup_formatted, pickup_latitude, pickup_longitude,
-          delivery_formatted, delivery_latitude, delivery_longitude,
-          timing, preferred_date, preferred_date_to, status, created_at, updated_at,
-          COALESCE((SELECT ARRAY_AGG(image.id ORDER BY image.position) FROM vanscout_request_draft_images image WHERE image.transport_request_id = vanscout_transport_requests.id), ARRAY[]::text[]) AS image_ids
-        FROM vanscout_transport_requests
-        WHERE requester_id = ${requesterId} AND status = 'completed'
-        ORDER BY created_at DESC
-      `
-    : await sql`
-        SELECT id, category, item_name, description, length_cm, width_cm, weight_kg,
-          pickup_formatted, pickup_latitude, pickup_longitude,
-          delivery_formatted, delivery_latitude, delivery_longitude,
-          timing, preferred_date, preferred_date_to, status, created_at, updated_at,
-          COALESCE((SELECT ARRAY_AGG(image.id ORDER BY image.position) FROM vanscout_request_draft_images image WHERE image.transport_request_id = vanscout_transport_requests.id), ARRAY[]::text[]) AS image_ids
-        FROM vanscout_transport_requests
-        WHERE requester_id = ${requesterId} AND status <> 'completed'
-        ORDER BY created_at DESC
-      `;
+  const statusFilter = filter === "all" ? "TRUE" : filter === "completed" ? "status = 'completed'" : "status <> 'completed'";
+  const rows = await sql.query(`
+    SELECT id, category, item_name, description, length_cm, width_cm, weight_kg,
+      pickup_formatted, pickup_latitude, pickup_longitude,
+      delivery_formatted, delivery_latitude, delivery_longitude,
+      timing, preferred_date, preferred_date_to, status, created_at, updated_at,
+      COALESCE((SELECT ARRAY_AGG(image.id ORDER BY image.position) FROM vanscout_request_draft_images image WHERE image.transport_request_id = vanscout_transport_requests.id), ARRAY[]::text[]) AS image_ids,
+      EXISTS (
+        SELECT 1 FROM vanscout_transport_offers unread_offer
+        LEFT JOIN vanscout_transport_offer_reads read_state
+          ON read_state.transport_request_id = unread_offer.transport_request_id
+        WHERE unread_offer.transport_request_id = vanscout_transport_requests.id
+          AND unread_offer.updated_at > COALESCE(read_state.read_at, TIMESTAMPTZ 'epoch')
+      ) AS has_unread_offers
+    FROM vanscout_transport_requests
+    WHERE requester_id = $1 AND ${statusFilter}
+    ORDER BY created_at DESC
+  `, [requesterId]);
   return rows.map(row => toTransportRequest(row as Record<string, unknown>));
 }
 
