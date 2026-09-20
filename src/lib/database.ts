@@ -136,11 +136,22 @@ async function ensureSchema() {
         )
       `;
       await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_profile_photos (
+          id TEXT PRIMARY KEY,
+          carrier_id TEXT NOT NULL UNIQUE REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          filename TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          image_data BYTEA NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`
         CREATE TABLE IF NOT EXISTS vanscout_transport_offers (
           id TEXT PRIMARY KEY,
           transport_request_id TEXT NOT NULL REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,
           carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
           price_cents INTEGER NOT NULL CHECK (price_cents > 0),
+          vat_included BOOLEAN NOT NULL DEFAULT TRUE,
           available_date DATE NOT NULL,
           message TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected')),
@@ -159,6 +170,7 @@ async function ensureSchema() {
       await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS carrier_agreed_at TIMESTAMPTZ`;
       await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ`;
       await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS commission_cents INTEGER NOT NULL DEFAULT 0 CHECK (commission_cents >= 0)`;
+      await sql`ALTER TABLE vanscout_transport_offers ADD COLUMN IF NOT EXISTS vat_included BOOLEAN NOT NULL DEFAULT TRUE`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_transport_idx ON vanscout_transport_offers (transport_request_id, created_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_offers_carrier_idx ON vanscout_transport_offers (carrier_id, created_at DESC)`;
       // Older databases may have been created before the composite foreign key
@@ -220,6 +232,15 @@ async function ensureSchema() {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_messages_offer_created_idx ON vanscout_messages (offer_id, created_at ASC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_conversation_reads (
+          offer_id TEXT NOT NULL REFERENCES vanscout_transport_offers(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (offer_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_conversation_reads_user_idx ON vanscout_conversation_reads (user_id)`;
     }).catch(error => {
       schemaReady = null;
       throw error;

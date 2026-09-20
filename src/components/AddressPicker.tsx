@@ -210,7 +210,6 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
     <div className="address-picker-map-shell">
       <div ref={mapContainerRef} className="address-picker-map" aria-label={t("Map for selecting an exact location")} />
       <span className="address-picker-pin" aria-hidden="true"><svg viewBox="0 0 40 50"><path d="M20 2C10.06 2 2 10.06 2 20c0 13.5 18 28 18 28s18-14.5 18-28C38 10.06 29.94 2 20 2Z" /><circle cx="20" cy="20" r="6" /></svg></span>
-      {!selected && <div className="address-picker-map-prompt" aria-hidden="true"><b>{t("Choose the exact location")}</b><span>{t("Search for an address or select a point on the map.")}</span></div>}
       {isResolving && <div className="address-picker-map-loading" role="status">{t("Finding address…")}</div>}
     </div>
     {precisionHint && <p className="address-picker-hint">{precisionHint}</p>}

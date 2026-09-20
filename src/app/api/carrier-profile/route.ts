@@ -22,14 +22,20 @@ export async function PUT(request: Request) {
   if (!form) return NextResponse.json({ error: "Invalid profile" }, { status: 400 });
   const companyName = String(form.get("companyName") || "").trim();
   const bio = String(form.get("bio") || "").trim();
-  const replaceImages = form.get("replaceImages") === "true";
+  const galleryChanged = form.get("galleryChanged") === "true";
+  const retainedImageIds = form.getAll("retainedImageIds").map(String);
   const images = form.getAll("images").filter((value): value is File => value instanceof File && value.size > 0);
+  const profileImageValue = form.get("profileImage");
+  const profileImage = profileImageValue instanceof File && profileImageValue.size > 0 ? profileImageValue : null;
   if (!companyName || companyName.length > 150 || bio.length > 1500) return NextResponse.json({ error: "Check the profile details" }, { status: 400 });
-  if (images.length > 3 || images.some(image => !image.type.startsWith("image/") || image.size > MAX_IMAGE_BYTES)) {
+  if (retainedImageIds.length + images.length > 3 || images.some(image => !image.type.startsWith("image/") || image.size > MAX_IMAGE_BYTES)) {
     return NextResponse.json({ error: "Choose up to 3 images, no larger than 10 MB each" }, { status: 400 });
   }
+  if (profileImage && (!profileImage.type.startsWith("image/") || profileImage.size > MAX_IMAGE_BYTES)) {
+    return NextResponse.json({ error: "Choose an image no larger than 10 MB" }, { status: 400 });
+  }
   try {
-    return NextResponse.json({ profile: await updateCarrierProfile(user, companyName, bio, replaceImages ? images : null) });
+    return NextResponse.json({ profile: await updateCarrierProfile(user, companyName, bio, galleryChanged ? { retainedImageIds, newImages: images } : null, profileImage) });
   } catch (error) {
     console.error("Unable to update carrier profile", error);
     return NextResponse.json({ error: "Unable to save profile" }, { status: 500 });

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
-import { createOrUpdateOffer, listOffersForCustomer } from "@/lib/marketplace";
+import { createOrUpdateOffer, InsufficientCreditsError, listOffersForCustomer } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
 
 const offerSchema = z.object({
   priceCents: z.number().int().positive().max(100_000_000),
+  vatIncluded: z.boolean().default(true),
   availableDate: z.string().date(),
   message: z.string().trim().max(2000).default(""),
 });
@@ -37,6 +38,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ]);
     return NextResponse.json({ offer }, { status: 201 });
   } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json({ error: "Insufficient credits", requiredCents: error.requiredCents, balanceCents: error.balanceCents }, { status: 402 });
+    }
     console.error("Unable to save offer", error);
     return NextResponse.json({ error: "Unable to save offer" }, { status: 500 });
   }

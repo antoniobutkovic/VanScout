@@ -10,6 +10,7 @@ export type TransportOffer = {
   companyName: string;
   completedTransports: number;
   priceCents: number;
+  vatIncluded: boolean;
   availableDate: string;
   message: string;
   status: OfferStatus;
@@ -32,6 +33,7 @@ export type CarrierProfile = {
   companyName: string;
   bio: string;
   completedTransports: number;
+  profileImageId: string | null;
   imageIds: string[];
 };
 
@@ -42,6 +44,7 @@ export type Conversation = {
   otherPartyName: string;
   companyName: string;
   priceCents: number;
+  vatIncluded: boolean;
   availableDate: string;
   offerMessage: string;
   role: "requester" | "transporter";
@@ -50,10 +53,12 @@ export type Conversation = {
   carrierAgreed: boolean;
   confirmedAt: string | null;
   commissionCents: number;
+  carrierBalanceCents: number;
   otherPartyEmail: string | null;
   otherPartyPhone: string | null;
   lastMessage: string | null;
   lastMessageAt: string | null;
+  hasUnreadMessages: boolean;
 };
 
 export type ChatMessage = {

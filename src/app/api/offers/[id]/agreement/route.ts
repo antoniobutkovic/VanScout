@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticatedUser } from "@/lib/request-auth";
-import { agreeToOffer, listTransportDealTargets, selectOfferForTransport } from "@/lib/marketplace";
+import { agreeToOffer, InsufficientCreditsError, listTransportDealTargets, selectOfferForTransport } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -22,6 +22,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ]);
     return NextResponse.json({ deal });
   } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json({ error: "Insufficient credits", requiredCents: error.requiredCents, balanceCents: error.balanceCents }, { status: 402 });
+    }
     console.error("Unable to update transport agreement", error);
     return NextResponse.json({ error: "Unable to update agreement" }, { status: 500 });
   }
