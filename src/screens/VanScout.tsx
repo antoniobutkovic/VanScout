@@ -70,6 +70,12 @@ function firebasePhoneError(error: unknown, translate: (key: string) => string, 
     "auth/invalid-credential": "The verification code is invalid or expired. Request a new code and try again.",
     "auth/code-expired": "The verification code has expired. Send a new code.",
     "auth/too-many-requests": "Too many attempts. Please wait a few minutes before trying again.",
+    "auth/quota-exceeded": "We can't send another code to this number right now. Please try again later.",
+    "auth/network-request-failed": "Check your internet connection and try again.",
+    "auth/captcha-check-failed": "Security verification failed. Reload the page and try again.",
+    "auth/invalid-app-credential": "Phone verification could not be started. Reload the page and try again.",
+    "auth/operation-not-allowed": "Phone verification is not available. Please contact support.",
+    "auth/app-not-authorized": "Phone verification is not available on this website yet.",
   };
   if (messages[code]) return translate(messages[code]);
   // Firebase setup, quota, security-check, and unknown errors are intentionally
@@ -77,6 +83,11 @@ function firebasePhoneError(error: unknown, translate: (key: string) => string, 
   return translate(action === "send"
     ? "We couldn't send a verification code right now. Please try again in a moment."
     : "We couldn't verify your phone number right now. Please try again in a moment.");
+}
+
+function isInvalidPhoneError(error: unknown) {
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+  return code === "auth/invalid-phone-number" || code === "auth/missing-phone-number";
 }
 
 function isValidEmail(value: string) {
@@ -223,17 +234,17 @@ function PhoneNumberField({ country, localNumber, onCountryChange, onNumberChang
   }} placeholder={t("91 234 5678")} /></div>{error && <span className="field-error" role="alert">{error}</span>}</div>;
 }
 
-function normalizedPhoneNumber(country: CountryCode, input: string) {
+function normalizedPhoneNumber(country: CountryCode, input: string, allowTestNumber: boolean) {
   const parsed = parsePhoneNumberFromString(input, country);
   const type = parsed?.getType();
   if (parsed?.isValid() && parsed.country === country && (!type || type === "MOBILE" || type === "FIXED_LINE_OR_MOBILE")) {
     return parsed.number;
   }
 
-  // Keep the E.164 structure check here, but let Firebase be authoritative
-  // about whether the number is a whitelisted fictional number or a real
-  // mobile range. This prevents libphonenumber metadata from rejecting a
-  // Firebase test number such as +38500000000.
+  if (!allowTestNumber) return null;
+
+  // Firebase test mode accepts fictional numbers configured in the Firebase
+  // console, which may not exist in libphonenumber metadata.
   const digits = input.replace(/\D/g, "");
   const dialCode = getCountryCallingCode(country);
   const international = digits.startsWith(dialCode) ? digits : `${dialCode}${digits}`;
@@ -737,11 +748,18 @@ export function Registration() {
       const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
       const configPayload = await configResponse.json() as AuthConfig;
       if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error("Phone verification unavailable");
-      const phoneNumber = normalizedPhoneNumber(country, localNumber);
+      const phoneNumber = normalizedPhoneNumber(country, localNumber, configPayload.firebase.testMode);
       if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
 
       const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ phoneNumber }) });
-      if (!validationResponse.ok) throw new Error("Phone verification unavailable");
+      const validationPayload = await validationResponse.json().catch(() => ({})) as { error?: string };
+      if (!validationResponse.ok) {
+        if (validationResponse.status === 400) {
+          setPhoneError(t(validationPayload.error || "Enter a valid mobile number for the selected country"));
+          return;
+        }
+        throw new Error(validationPayload.error || "Phone verification unavailable");
+      }
 
       const auth = getFirebasePhoneAuth(configPayload.firebase);
       auth.languageCode = language;
@@ -755,7 +773,9 @@ export function Registration() {
       setStage("phone-code");
       setMessage(configPayload.firebase.testMode ? "" : t("We sent a six-digit code to your phone."));
     } catch (error) {
-      setAuthError(firebasePhoneError(error, t, "send"));
+      const message = firebasePhoneError(error, t, "send");
+      if (isInvalidPhoneError(error)) setPhoneError(message);
+      else setAuthError(message);
       confirmationResult.current = null;
     } finally {
       recaptchaVerifier.current?.clear();
