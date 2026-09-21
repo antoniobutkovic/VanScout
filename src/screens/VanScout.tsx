@@ -244,11 +244,11 @@ function normalizedPhoneNumber(country: CountryCode, input: string) {
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
   const { t } = useLanguage();
   const nav = useNavigate();
-  const logout = () => {
-    clearAuthSession();
+  const logout = async () => {
+    await clearAuthSession();
     nav("/", { replace: true });
   };
-  return <div className="nav-actions">{kind ? <>{kind === "customer" && <Link className="button dark short" to="/create-request" state={{ returnTo: "/customer" }}>{t("New request")}</Link>}<LanguagePicker /><button type="button" className="logout-button" onClick={logout}>{t("Log out")}</button></> : <><LanguagePicker /><Link className="sign-in" to="/auth">{t("Sign in")}</Link></>}</div>;
+  return <div className="nav-actions">{kind ? <>{kind === "customer" && <Link className="button dark short" to="/create-request" state={{ returnTo: "/customer" }}>{t("New request")}</Link>}<LanguagePicker /><button type="button" className="logout-button" onClick={() => void logout()}>{t("Log out")}</button></> : <><LanguagePicker /><Link className="sign-in" to="/auth">{t("Sign in")}</Link></>}</div>;
 }
 
 function useHasMessages(kind?: "customer" | "carrier") {

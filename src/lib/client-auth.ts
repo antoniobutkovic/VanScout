@@ -12,9 +12,14 @@ export function getAuthToken() {
   return window.localStorage.getItem("auth_token") || "cookie";
 }
 
-export function clearAuthSession() {
+export async function clearAuthSession() {
   window.localStorage.removeItem("auth_token");
-  void fetch("/api/auth/logout", { method: "POST", keepalive: true });
+  try {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin", cache: "no-store" });
+  } catch {
+    // A failed request cannot clear an HttpOnly cookie. The next authenticated
+    // request will still reject an expired or invalid session server-side.
+  }
 }
 
 export async function fetchSessionUser(signal?: AbortSignal): Promise<SessionUser | null> {
