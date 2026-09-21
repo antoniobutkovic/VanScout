@@ -188,6 +188,8 @@ const CROATIAN: Record<string, string> = {
   "Enter your first and last name": "Unesite ime i prezime.",
   "Password must be at least 8 characters": "Lozinka mora imati najmanje 8 znakova.",
   "Use at least 8 characters": "Upotrijebite najmanje 8 znakova.",
+  "Password must be at least 12 characters": "Lozinka mora imati najmanje 12 znakova.",
+  "Use at least 12 characters": "Upotrijebite najmanje 12 znakova.",
   "Unable to send the verification email": "Nije moguće poslati e-poštu za potvrdu.",
   "Unable to send verification email": "Nije moguće poslati e-poštu za potvrdu.",
   "Verification email sent": "E-pošta za potvrdu je ponovno poslana.",
@@ -554,6 +556,15 @@ const CROATIAN: Record<string, string> = {
   "Your equipment": "Vaša oprema",
   "Add vehicle": "Dodaj vozilo",
   Remove: "Ukloni",
+  "Privacy and your data": "Privatnost i vaši podaci",
+  "Download a copy of your VanScout data or permanently delete your account.": "Preuzmite kopiju svojih VanScout podataka ili trajno izbrišite račun.",
+  "Download my data": "Preuzmi moje podatke",
+  "Delete my account": "Izbriši moj račun",
+  "Unable to export your data": "Nije moguće izvesti vaše podatke",
+  "Unable to delete your account": "Nije moguće izbrisati vaš račun",
+  "Type DELETE MY ACCOUNT to permanently delete your account and associated data.": "Upišite DELETE MY ACCOUNT kako biste trajno izbrisali račun i povezane podatke.",
+  "This cannot be undone. Continue?": "Ovu radnju nije moguće poništiti. Nastaviti?",
+  "Loading profile…": "Učitavanje profila…",
 };
 
 function interpolate(value: string, params?: TranslationParams) {

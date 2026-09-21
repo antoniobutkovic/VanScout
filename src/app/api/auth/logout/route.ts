@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
+import { clearSessionCookie } from "@/lib/session";
 
 export function POST() {
-  return NextResponse.json({ ok: true });
+  return clearSessionCookie(NextResponse.json({ ok: true }));
 }

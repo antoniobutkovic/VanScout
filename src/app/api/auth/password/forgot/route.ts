@@ -5,11 +5,14 @@ import { createPasswordReset } from "@/lib/database";
 import { sendPasswordResetEmail } from "@/lib/mailer";
 import { createResetToken } from "@/lib/password";
 import { optionalEnv } from "@/lib/config";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({ email: z.string().email() });
 const genericResponse = { message: "If an account exists for this email, a reset link has been sent." };
 
 export async function POST(request: Request) {
+  const rate = checkRateLimit(request, "password-forgot", 5, 60 * 60 * 1000);
+  if (!rate.allowed) return NextResponse.json(genericResponse, { status: 202, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
   try {
     const body = bodySchema.parse(await request.json());
     const token = createResetToken();
@@ -29,4 +32,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unable to send the reset email" }, { status: 500 });
   }
 }
-

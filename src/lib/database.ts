@@ -233,9 +233,19 @@ async function ensureSchema() {
           id TEXT PRIMARY KEY,
           offer_id TEXT NOT NULL REFERENCES vanscout_transport_offers(id) ON DELETE CASCADE,
           sender_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
-          body TEXT NOT NULL CHECK (LENGTH(body) BETWEEN 1 AND 2000),
+          body TEXT NOT NULL CONSTRAINT vanscout_messages_encrypted_body_check CHECK (LENGTH(body) BETWEEN 1 AND 10000),
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+      `;
+      await sql`ALTER TABLE vanscout_messages DROP CONSTRAINT IF EXISTS vanscout_messages_body_check`;
+      await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vanscout_messages_encrypted_body_check') THEN
+            ALTER TABLE vanscout_messages
+              ADD CONSTRAINT vanscout_messages_encrypted_body_check CHECK (LENGTH(body) BETWEEN 1 AND 10000);
+          END IF;
+        END $$
       `;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_messages_offer_created_idx ON vanscout_messages (offer_id, created_at ASC)`;
       await sql`

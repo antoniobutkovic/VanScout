@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { findUserByGoogleIdentity, upsertGoogleUser } from "@/lib/database";
-import { createGoogleRegistrationToken, createSessionToken } from "@/lib/session";
+import { createGoogleRegistrationToken, createSessionToken, setSessionCookie } from "@/lib/session";
 import { verifyGoogleIdToken } from "@/lib/google";
 
 const bodySchema = z.object({
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     }
     const user = await upsertGoogleUser(identity, body.role);
     const token = await createSessionToken(user);
-    return NextResponse.json({ token, user });
+    return setSessionCookie(NextResponse.json({ user }), token);
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Invalid Google sign-in request" }, { status: 400 });
     console.error("Google sign-in failed", error);

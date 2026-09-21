@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sqlClient, type AppUser } from "./database";
 import { dateOnly, toTransportRequest } from "./transports";
 import type { CarrierProfile, ChatMessage, Conversation, MarketplaceTransport, OfferStatus, TransportOffer } from "./marketplace-types";
+import { decryptMessage, encryptMessage } from "./message-crypto";
 import type { TransportStatus } from "./transport-types";
 
 function iso(value: unknown) {
@@ -20,7 +21,7 @@ function toOffer(row: Record<string, unknown>): TransportOffer {
     priceCents: Number(row.price_cents),
     vatIncluded: row.vat_included === undefined ? true : Boolean(row.vat_included),
     availableDate: dateOnly(row.available_date) || "",
-    message: typeof row.message === "string" ? row.message : "",
+    message: typeof row.message === "string" ? decryptMessage(row.message) : "",
     status: String(row.offer_status ?? row.status) as OfferStatus,
     selectedByCustomer: Boolean(row.selected_by_customer),
     carrierAgreed: Boolean(row.carrier_agreed_at),
@@ -76,10 +77,11 @@ export async function createOrUpdateOffer(carrier: AppUser, transportId: string,
   await ensureDatabaseSchema();
   await requireCarrierCredits(carrier.id, input.priceCents);
   const sql = sqlClient();
+  const encryptedOfferMessage = encryptMessage(input.message);
   const rows = await sql`
     WITH saved AS (
       INSERT INTO vanscout_transport_offers (id, transport_request_id, carrier_id, price_cents, vat_included, available_date, message)
-      SELECT ${randomUUID()}, tr.id, ${carrier.id}, ${input.priceCents}, ${input.vatIncluded}, ${input.availableDate}, ${input.message}
+      SELECT ${randomUUID()}, tr.id, ${carrier.id}, ${input.priceCents}, ${input.vatIncluded}, ${input.availableDate}, ${encryptedOfferMessage}
       FROM vanscout_transport_requests tr
       WHERE tr.id = ${transportId} AND tr.status = 'looking_for_carriers' AND tr.requester_id <> ${carrier.id}
       ON CONFLICT (transport_request_id, carrier_id) DO UPDATE SET
@@ -536,7 +538,7 @@ export async function listConversations(user: AppUser): Promise<Conversation[]> 
       priceCents: Number(row.price_cents),
       vatIncluded: Boolean(row.vat_included),
       availableDate: dateOnly(row.available_date) || "",
-      offerMessage: typeof row.offer_message === "string" ? row.offer_message : "",
+      offerMessage: typeof row.offer_message === "string" ? decryptMessage(row.offer_message) : "",
       role: user.role,
       status: String(row.offer_status) as OfferStatus,
       selectedByCustomer: Boolean(row.selected_by_customer),
@@ -546,7 +548,7 @@ export async function listConversations(user: AppUser): Promise<Conversation[]> 
       carrierBalanceCents: Number(row.carrier_balance_cents ?? 0),
       otherPartyEmail: typeof row.other_party_email === "string" ? row.other_party_email : null,
       otherPartyPhone: typeof row.other_party_phone === "string" ? row.other_party_phone : null,
-      lastMessage: typeof row.last_message === "string" ? row.last_message : null,
+      lastMessage: typeof row.last_message === "string" ? decryptMessage(row.last_message) : null,
       lastMessageAt: row.last_message_at ? iso(row.last_message_at) : null,
       hasUnreadMessages: Boolean(row.has_unread_messages),
     };
@@ -598,7 +600,7 @@ export async function listMessages(offerId: string, userId: string): Promise<Cha
   }
   return rows.map(raw => {
     const row = raw as Record<string, unknown>;
-    return { id: String(row.id), senderId: String(row.sender_id), senderName: String(row.sender_name), body: String(row.body), createdAt: iso(row.created_at) };
+    return { id: String(row.id), senderId: String(row.sender_id), senderName: String(row.sender_name), body: decryptMessage(String(row.body)), createdAt: iso(row.created_at) };
   });
 }
 
@@ -617,11 +619,12 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
   if (String(access[0].carrier_id) === senderId && String(access[0].status) === "pending") {
     await requireCarrierCredits(senderId, Number(access[0].price_cents));
   }
+  const encryptedBody = encryptMessage(body);
   const rows = await sql`
     INSERT INTO vanscout_messages (id, offer_id, sender_id, body)
-    VALUES (${randomUUID()}, ${offerId}, ${senderId}, ${body})
-    RETURNING id, sender_id, body, created_at
+    VALUES (${randomUUID()}, ${offerId}, ${senderId}, ${encryptedBody})
+    RETURNING id, sender_id, created_at
   `;
   const row = rows[0] as Record<string, unknown>;
-  return { id: String(row.id), senderId: String(row.sender_id), body: String(row.body), createdAt: iso(row.created_at) };
+  return { id: String(row.id), senderId: String(row.sender_id), body, createdAt: iso(row.created_at) };
 }

@@ -1,10 +1,13 @@
 import { jwtVerify, SignJWT } from "jose";
+import type { NextResponse } from "next/server";
 import { requiredEnv } from "./config";
 import type { GoogleIdentity } from "./google";
 
 const ISSUER = "vanscout-api";
 const AUDIENCE = "vanscout-web";
 const GOOGLE_REGISTRATION_AUDIENCE = "vanscout-google-registration";
+const SESSION_COOKIE = "vanscout_session";
+const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 
 function secretKey() {
   const secret = requiredEnv("JWT_SECRET");
@@ -18,7 +21,7 @@ export async function createSessionToken(user: { id: string; email: string; role
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
     .setIssuedAt()
-    .setExpirationTime("30d")
+    .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)
     .sign(secretKey());
 }
 
@@ -59,5 +62,41 @@ export async function verifyGoogleRegistrationToken(token: string): Promise<Goog
 
 export function bearerToken(request: Request) {
   const header = request.headers.get("authorization");
-  return header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : null;
+  const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : null;
+  return token && token !== "cookie" ? token : null;
+}
+
+function cookieToken(request: Request) {
+  const rawCookie = request.headers.get("cookie") || "";
+  for (const entry of rawCookie.split(";")) {
+    const [name, ...value] = entry.trim().split("=");
+    if (name === SESSION_COOKIE) return decodeURIComponent(value.join("="));
+  }
+  return null;
+}
+
+export function sessionToken(request: Request) {
+  return bearerToken(request) || cookieToken(request);
+}
+
+export function setSessionCookie(response: NextResponse, token: string) {
+  response.cookies.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS,
+  });
+  return response;
+}
+
+export function clearSessionCookie(response: NextResponse) {
+  response.cookies.set(SESSION_COOKIE, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  return response;
 }

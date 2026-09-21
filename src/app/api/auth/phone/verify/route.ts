@@ -3,7 +3,8 @@ import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
 import { createGoogleUserWithPhone, verifyUserPhone } from "@/lib/database";
 import { verifiedFirebasePhoneNumber } from "@/lib/firebase-token";
-import { bearerToken, createSessionToken, verifyGoogleRegistrationToken } from "@/lib/session";
+import { bearerToken, createSessionToken, setSessionCookie, verifyGoogleRegistrationToken } from "@/lib/session";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   firebaseIdToken: z.string().min(100),
@@ -13,6 +14,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const rate = checkRateLimit(request, "phone-verify", 10, 60 * 60 * 1000);
+  if (!rate.allowed) return NextResponse.json({ error: "Too many phone verification attempts. Try again later." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
   const authenticated = await authenticatedUser(request);
 
   try {
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
     const phoneNumber = await verifiedFirebasePhoneNumber(body.firebaseIdToken);
     const user = await createGoogleUserWithPhone(identity, body.role, body.firstName, body.lastName, phoneNumber);
     const token = await createSessionToken(user);
-    return NextResponse.json({ token, user });
+    return setSessionCookie(NextResponse.json({ user }), token);
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Phone verification token is required" }, { status: 400 });
     if (error instanceof Error && error.message.includes("unique")) return NextResponse.json({ error: "This phone number is already used by another account" }, { status: 409 });

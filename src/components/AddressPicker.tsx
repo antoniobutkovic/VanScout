@@ -65,29 +65,29 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
     let disposed = false;
     let map: import("maplibre-gl").Map | null = null;
 
-    void import("maplibre-gl").then(({ default: maplibregl }) => {
+    void import("maplibre-gl").then(maplibregl => {
       if (disposed || !mapContainerRef.current) return;
       const initialLocation = valueRef.current;
       const initialLongitude = initialLocation?.longitude ?? ZAGREB[0];
       const initialLatitude = initialLocation?.latitude ?? ZAGREB[1];
 
-      map = new maplibregl.Map({
+      const nextMap = new maplibregl.Map({
         container: mapContainerRef.current,
         style: "https://tiles.openfreemap.org/styles/liberty",
         center: [initialLongitude, initialLatitude],
         zoom: initialLocation ? 16 : 11,
       });
-      map.on("dragend", () => {
-        const coordinates = map?.getCenter();
-        if (!coordinates) return;
+      nextMap.on("dragend", () => {
+        const coordinates = nextMap.getCenter();
         resolveCoordinatesRef.current(coordinates.lat, coordinates.lng);
       });
-      map.on("click", event => {
-        map?.easeTo({ center: event.lngLat, duration: 300 });
+      nextMap.on("click", event => {
+        nextMap.easeTo({ center: event.lngLat, duration: 300 });
         resolveCoordinatesRef.current(event.lngLat.lat, event.lngLat.lng);
       });
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-      mapRef.current = map;
+      nextMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+      map = nextMap;
+      mapRef.current = nextMap;
     });
 
     return () => {

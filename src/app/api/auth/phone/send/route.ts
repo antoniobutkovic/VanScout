@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
 import { bearerToken, verifyGoogleRegistrationToken } from "@/lib/session";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({ phoneNumber: z.string().regex(/^\+[1-9]\d{7,14}$/) });
 
 export async function POST(request: Request) {
+  const rate = checkRateLimit(request, "phone-send", 5, 60 * 60 * 1000);
+  if (!rate.allowed) return NextResponse.json({ error: "Too many phone verification attempts. Try again later." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
   const user = await authenticatedUser(request);
   if (!user) {
     const token = bearerToken(request);

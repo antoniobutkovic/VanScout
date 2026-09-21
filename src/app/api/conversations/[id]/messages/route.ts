@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
 import { InsufficientCreditsError, listMessages, sendMessage } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
 
@@ -12,10 +13,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const messages = await listMessages(id, user.id);
   if (!messages) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ messages, userId: user.id });
+  return NextResponse.json({ messages, userId: user.id }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const rate = checkRateLimit(request, "send-message", 60, 60 * 1000);
+  if (!rate.allowed) return NextResponse.json({ error: "Too many messages. Try again shortly." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
   const user = await authenticatedUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const parsed = messageSchema.safeParse(await request.json().catch(() => null));

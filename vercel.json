@@ -1,4 +1,6 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npm run build"
+  "buildCommand": "node scripts/compliant-build.mjs",
+  "regions": ["fra1"],
+  "crons": [{ "path": "/api/internal/retention", "schedule": "17 3 * * *" }]
 }

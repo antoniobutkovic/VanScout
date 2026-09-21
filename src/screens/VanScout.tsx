@@ -8,6 +8,7 @@ import { IMAGES } from "../assets/images";
 import { LanguagePicker, useLanguage } from "../i18n";
 import { Picker } from "../components/Picker";
 import { AddressPicker } from "../components/AddressPicker";
+import { LegalDocumentContent } from "../components/LegalDocumentContent";
 import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-phone";
 import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from "../lib/client-auth";
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
@@ -82,7 +83,7 @@ function isValidEmail(value: string) {
   return EMAIL_PATTERN.test(value.trim());
 }
 
-function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: { role?: AuthRole; onAuthenticated: (token: string, user: AuthenticatedUser) => void; onRegistrationRequired: (registration: GoogleRegistration) => void }) {
+function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: { role?: AuthRole; onAuthenticated: (user: AuthenticatedUser) => void; onRegistrationRequired: (registration: GoogleRegistration) => void }) {
   const { language, t } = useLanguage();
   const [error, setError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -110,8 +111,8 @@ function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: {
           onRegistrationRequiredRef.current({ token: payload.registrationToken, profile: payload.profile });
           return;
         }
-        if (!payload.token || !payload.user) throw new Error(payload.error || t("Google sign-in failed"));
-        onAuthenticatedRef.current(payload.token, payload.user);
+        if (!payload.user) throw new Error(payload.error || t("Google sign-in failed"));
+        onAuthenticatedRef.current(payload.user);
       } catch (authError) {
         setIsSigningIn(false);
         setError(authError instanceof Error ? authError.message : t("Google sign-in failed"));
@@ -388,9 +389,9 @@ const LEGAL_DOCUMENTS: Record<LegalDocument, { title: string; introduction: stri
 };
 
 export function LegalPage({ document }: { document: LegalDocument }) {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const page = LEGAL_DOCUMENTS[document];
-  return <div className="site"><Topbar /><main className="legal-page"><section className="legal-intro"><p className="eyebrow">{t("Legal information")}</p><h1>{t(page.title)}</h1><p>{t(page.introduction)}</p></section><section className="legal-content"><article><span>01</span><div><h2>{t(page.title)}</h2><p>{t("This page is being prepared")}</p></div></article><article><span>02</span><div><h2>{t("Contact")}</h2><p><a href="mailto:hello@vanscout.example">hello@vanscout.example</a></p></div></article></section></main><Footer /></div>;
+  return <div className="site"><Topbar /><main className="legal-page"><section className="legal-intro"><p className="eyebrow">{t("Legal information")}</p><h1>{t(page.title)}</h1><p>{t(page.introduction)}</p></section><LegalDocumentContent document={document} language={language} /></main><Footer /></div>;
 }
 
 export function Home() {
@@ -610,7 +611,7 @@ export function Registration() {
 
   const validatePasswords = () => {
     if (stage !== "profile" || googleRegistrationToken) return true;
-    const nextPasswordError = password.length < 8 ? t("Password must be at least 8 characters") : "";
+    const nextPasswordError = password.length < 12 ? t("Password must be at least 12 characters") : "";
     const nextConfirmationError = password !== passwordConfirmation ? t("Passwords do not match") : "";
     setPasswordError(nextPasswordError);
     setPasswordConfirmationError(nextConfirmationError);
@@ -658,14 +659,13 @@ export function Registration() {
         emailResendCooldown.start();
         return;
       }
-      if (!payload.token || !payload.user) throw new Error(t("Unable to sign in"));
-      window.localStorage.setItem("auth_token", payload.token);
+      if (!payload.user) throw new Error(t("Unable to sign in"));
       setRole(payload.user.role);
       if (!payload.user.phoneVerified) {
         setStage("phone");
         return;
       }
-      await syncPhotosAndNavigate(payload.token, payload.user);
+      await syncPhotosAndNavigate(getAuthToken(), payload.user);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : t(stage === "profile" ? "Unable to create account" : "Unable to sign in"));
     } finally {
@@ -673,11 +673,11 @@ export function Registration() {
     }
   };
 
-  const authenticated = (token: string, user: AuthenticatedUser) => {
-    window.localStorage.setItem("auth_token", token);
+  const authenticated = (user: AuthenticatedUser) => {
+    window.localStorage.removeItem("auth_token");
     setGoogleRegistrationToken("");
     setRole(user.role);
-    if (user.phoneVerified) void syncPhotosAndNavigate(token, user);
+    if (user.phoneVerified) void syncPhotosAndNavigate(getAuthToken(), user);
     else setStage("phone");
   };
 
@@ -709,8 +709,8 @@ export function Registration() {
     try {
       const response = await fetch("/api/auth/email/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: emailCode }) });
       const payload = await response.json() as { token?: string; user?: AuthenticatedUser; error?: string };
-      if (!response.ok || !payload.token || !payload.user) throw new Error(payload.error || t("Unable to verify your email"));
-      window.localStorage.setItem("auth_token", payload.token);
+      if (!response.ok || !payload.user) throw new Error(payload.error || t("Unable to verify your email"));
+      window.localStorage.removeItem("auth_token");
       setRole(payload.user.role);
       setStage("phone");
     } catch (error) { setAuthError(error instanceof Error ? error.message : t("Unable to verify your email")); }
@@ -733,7 +733,7 @@ export function Registration() {
     event.preventDefault();
     setSubmitting(true); setPhoneError(""); setAuthError(""); setMessage("");
     try {
-      const authorizationToken = googleRegistrationToken || window.localStorage.getItem("auth_token") || "";
+      const authorizationToken = googleRegistrationToken || getAuthToken();
       const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
       const configPayload = await configResponse.json() as AuthConfig;
       if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error("Phone verification unavailable");
@@ -772,7 +772,7 @@ export function Registration() {
     try {
       const credential = await confirmationResult.current.confirm(phoneCode);
       const firebaseIdToken = await credential.user.getIdToken();
-      const authorizationToken = googleRegistrationToken || window.localStorage.getItem("auth_token") || "";
+      const authorizationToken = googleRegistrationToken || getAuthToken();
       const response = await fetch("/api/auth/phone/verify", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ firebaseIdToken, ...(googleRegistrationToken ? { role, firstName, lastName } : {}) }) });
       const payload = await response.json() as { token?: string; user?: AuthenticatedUser };
       if (response.status === 409) {
@@ -780,8 +780,8 @@ export function Registration() {
         return;
       }
       if (!response.ok || !payload.user) throw new Error("Phone verification unavailable");
-      const sessionToken = payload.token || window.localStorage.getItem("auth_token") || "";
-      if (payload.token) window.localStorage.setItem("auth_token", payload.token);
+      const sessionToken = getAuthToken();
+      window.localStorage.removeItem("auth_token");
       if (firebaseAuth.current) await signOut(firebaseAuth.current);
       confirmationResult.current = null;
       setGoogleRegistrationToken("");
@@ -793,7 +793,7 @@ export function Registration() {
   return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>
     {stage === "login" && <><h1>{t("Login or create new account")}</h1><GoogleSignInButton onAuthenticated={authenticated} onRegistrationRequired={beginGoogleRegistration} /><div className="or">{t("or")}</div><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to="/auth?mode=register">{t("Create one here")}</Link></p></>}
     {stage === "role" && <><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setStage("profile")}>{t("Continue")} <Arrow /></button><button className="quiet-link auth-back" type="button" onClick={backToLogin}>← {t("Back")}</button></>}
-    {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" aria-invalid={Boolean(passwordError)} />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}>← {t("Back")}</button></>}
+    {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" aria-invalid={Boolean(passwordError)} />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}>← {t("Back")}</button></>}
     {stage === "email-code" && <><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form noValidate onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button></>}
     {stage === "phone" && <><h1>{t("Verify your phone.")}</h1><div className="security-note"><b>{t("Why we verify your phone")}</b><p>{t("Once a transport is agreed, VanScout shares phone contacts between both people. A verified number makes coordination easier and helps show that each person is genuine, adding an important layer of safety.")}</p></div><form noValidate onSubmit={sendPhoneCode}><PhoneNumberField country={country} localNumber={localNumber} onCountryChange={value => { setCountry(value); setLocalNumber(""); setPhoneError(""); }} onNumberChange={value => { setLocalNumber(value); setPhoneError(""); }} error={phoneError} />{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full auth-create-button" type="submit" disabled={submitting}>{t("Send verification code")} <Arrow /></button></form></>}
     {stage === "phone-code" && <><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsePhoneNumberFromString(pendingPhoneNumber)?.formatInternational() || pendingPhoneNumber}</strong>.</p><form noValidate onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); setPendingPhoneNumber(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
@@ -919,7 +919,7 @@ export function ResetPassword() {
   const [submitting, setSubmitting] = useState(false);
 
   const validatePasswords = () => {
-    const nextPasswordError = password.length < 8 ? t("Password must be at least 8 characters") : "";
+    const nextPasswordError = password.length < 12 ? t("Password must be at least 12 characters") : "";
     const nextConfirmationError = password !== passwordConfirmation ? t("Passwords do not match") : "";
     setPasswordError(nextPasswordError);
     setPasswordConfirmationError(nextConfirmationError);
@@ -950,7 +950,7 @@ export function ResetPassword() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!token ? <p className="auth-message error">{t("This reset link is invalid or expired")}</p> : <form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("New password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 8 ? t("Password must be at least 8 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} autoComplete="new-password" aria-describedby="reset-password-hint" aria-invalid={Boolean(passwordError)} /><span className="field-hint" id="reset-password-hint">{t("Use at least 8 characters")}</span>{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation">{t("Confirm password")}<PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Reset password")} <Arrow /></button></form>}<Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!token ? <p className="auth-message error">{t("This reset link is invalid or expired")}</p> : <form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("New password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} autoComplete="new-password" aria-describedby="reset-password-hint" aria-invalid={Boolean(passwordError)} /><span className="field-hint" id="reset-password-hint">{t("Use at least 12 characters")}</span>{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation">{t("Confirm password")}<PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Reset password")} <Arrow /></button></form>}<Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
 }
 
 function isTransportOverdue(status: TransportStatus, preferredDateFrom: string | null, preferredDateTo: string | null) {
@@ -1329,7 +1329,53 @@ function LiveMessages() {
     </div>}
   </section>;
 }
-function CustomerProfile() { const { t } = useLanguage(); return <section className="profile-page"><p className="eyebrow">{t("Account")}</p><h1>{t("Your profile")}</h1><div className="profile-head"><span className="avatar customer large">AN</span><div><h2>Ana Novak</h2><p>ana.novak@example.com · +385 91 555 2400</p><button className="quiet-link">{t("Edit profile")}</button></div></div><div className="setting-list"><button>{t("Notifications")} <i>›</i></button><button>{t("Payment methods")} <i>›</i></button><button>{t("Help and safety")} <i>›</i></button></div></section>; }
+function PrivacyControls() {
+  const { t } = useLanguage();
+  const nav = useNavigate();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/privacy/export", { cache: "no-store" });
+      if (!response.ok) throw new Error(t("Unable to export your data"));
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `vanscout-data-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) { setError(downloadError instanceof Error ? downloadError.message : t("Unable to export your data")); }
+    finally { setBusy(false); }
+  };
+  const erase = async () => {
+    const confirmation = window.prompt(t("Type DELETE MY ACCOUNT to permanently delete your account and associated data."));
+    if (confirmation !== "DELETE MY ACCOUNT" || !window.confirm(t("This cannot be undone. Continue?"))) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/privacy/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmation }) });
+      if (!response.ok) throw new Error(t("Unable to delete your account"));
+      clearAuthSession();
+      nav("/", { replace: true });
+    } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : t("Unable to delete your account")); setBusy(false); }
+  };
+  return <section className="privacy-controls"><h2>{t("Privacy and your data")}</h2><p>{t("Download a copy of your VanScout data or permanently delete your account.")}</p>{error && <p className="auth-message error" role="alert">{error}</p>}<div><button className="button dark short" type="button" disabled={busy} onClick={() => void download()}>{t("Download my data")}</button><button className="button danger short" type="button" disabled={busy} onClick={() => void erase()}>{t("Delete my account")}</button></div></section>;
+}
+
+function CustomerProfile() {
+  const { t } = useLanguage();
+  const [profile, setProfile] = useState<{ name: string; email: string; phoneNumber: string | null } | null>(null);
+  useEffect(() => {
+    void fetch("/api/me/profile", { cache: "no-store" }).then(async response => {
+      if (!response.ok) throw new Error();
+      const payload = await response.json() as { data?: { profile?: { name: string; email: string; phoneNumber: string | null } } };
+      setProfile(payload.data?.profile || null);
+    }).catch(() => setProfile(null));
+  }, []);
+  const initials = profile?.name.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
+  return <section className="profile-page"><p className="eyebrow">{t("Account")}</p><h1>{t("Your profile")}</h1><div className="profile-head"><span className="avatar customer large">{initials}</span><div><h2>{profile?.name || "—"}</h2><p>{profile ? `${profile.email}${profile.phoneNumber ? ` · ${profile.phoneNumber}` : ""}` : t("Loading profile…")}</p></div></div><PrivacyControls /></section>;
+}
 function Review({ onDone }: { onDone: () => void }) { const { t } = useLanguage(); const [rating, setRating] = useState(5); return <section className="review"><p className="eyebrow">{t("Transport complete")}</p><h1>{t("How did it go?")}</h1><div className="profile-head"><Avatar large /><div><h2>Mario M.</h2><p>{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p></div></div><div className="stars">{[1,2,3,4,5].map(n => <button className={n <= rating ? "on" : ""} onClick={() => setRating(n)} key={n}>★</button>)}</div><div className="tags">{["On time", "Great communication", "Careful handling", "Friendly"].map(x => <button key={x}>{t(x)}</button>)}</div><label><textarea placeholder={t("Add a short comment (optional)")} /></label><button className="button moss" onClick={onDone}>{t("Submit review")}</button></section>; }
 export function Tracking() { const { t } = useLanguage(); return <div className="tracking"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /><span>{t("Private delivery tracking")}</span></div></header><main><p className="eyebrow">{t("Bed slats")} · 12 km</p><h1>{t("Your delivery is on the way.")}</h1><div className="tracking-map"><RouteLine /><i>●</i><b className="map-pickup">{t("From")}: IKEA Zagreb</b><b className="map-delivery">{t("To")}: Trešnjevka</b></div><section className="eta"><div><Avatar /><span><b>Mario M.</b><small>Renault Master</small></span></div><div><span>{t("Estimated arrival")}</span><b>18:42</b></div></section><div className="transport-steps tracking-list"><div className="done"><b>✓</b><span><strong>{t("Picked up")}</strong><small>{t("17:28 — Mario has your item.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("In transit")}</strong><small>{t("18:04 — Heavy traffic. ETA updated by 12 minutes.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("We’ll let you know when it arrives.")}</small></span></div></div></main></div>; }
 function JobCard({ onOpen, compact = false }: { onOpen: () => void; compact?: boolean }) { const { t } = useLanguage(); return <article className={`job ${compact ? "compact" : ""}`}><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb <i>→</i> Trešnjevka</p><span>12 km</span><span>{t("Flexible")}</span><span>{t("No loading help required")}</span></div>{!compact && <b>3 {t("offers")}</b>}<button className="button dark short" onClick={onOpen}>{t("View job")}</button></article>; }
@@ -1499,7 +1545,7 @@ function CarrierProfileEditor() {
     setMessage(t("Profile saved"));
   };
   const initials = profile?.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="carrier-profile real-carrier-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}</span><span className="profile-photo-action">{t("Change photo")}</span></label><div><h1>{profile?.carrierName || t("Your profile")}</h1><p>{profile?.completedTransports || 0} {t("completed transports")}</p></div></div><form noValidate onSubmit={save}><label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /><span className="field-hint">{t("This name appears on your offers and in customer chats.")}</span></label><label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /><span className="field-hint">{t("A short, specific introduction helps customers choose with confidence.")}</span></label><div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div>{remainingImageSlots > 0 && <label className="business-image-picker"><input type="file" accept="image/*" multiple onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span>＋ {t("Add image")}</span></label>}</div>{imageCount > 0 && <div className="carrier-image-grid">{imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); setMessage(""); }}>×</button></figure>)}{files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); setMessage(""); }}>×</button></figure>)}</div>}{error && <p className="transport-list-message error">{error}</p>}{message && <p className="auth-message success">{message}</p>}<button className="button moss" type="submit">{t("Save profile")}</button></form></section>;
+  return <section className="carrier-profile real-carrier-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}</span><span className="profile-photo-action">{t("Change photo")}</span></label><div><h1>{profile?.carrierName || t("Your profile")}</h1><p>{profile?.completedTransports || 0} {t("completed transports")}</p></div></div><form noValidate onSubmit={save}><label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /><span className="field-hint">{t("This name appears on your offers and in customer chats.")}</span></label><label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /><span className="field-hint">{t("A short, specific introduction helps customers choose with confidence.")}</span></label><div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div>{remainingImageSlots > 0 && <label className="business-image-picker"><input type="file" accept="image/*" multiple onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span>＋ {t("Add image")}</span></label>}</div>{imageCount > 0 && <div className="carrier-image-grid">{imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); setMessage(""); }}>×</button></figure>)}{files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); setMessage(""); }}>×</button></figure>)}</div>}{error && <p className="transport-list-message error">{error}</p>}{message && <p className="auth-message success">{message}</p>}<button className="button moss" type="submit">{t("Save profile")}</button></form><PrivacyControls /></section>;
 }
 function JobDetail({ onBack, onOffer }: { onBack: () => void; onOffer: () => void }) { const { t } = useLanguage(); return <section className="job-detail"><button className="back" onClick={onBack}>← {t("Available transports")}</button><header><div><p className="eyebrow">{t("Furniture")} · {t("Flexible")}</p><h1>{t("Bed slats")}</h1><p>IKEA Zagreb <i>→</i> Trešnjevka</p></div><b>12 km</b></header><div className="job-layout"><div><div className="detail-map"><RouteLine /><span>IKEA Zagreb</span><span>Trešnjevka</span></div><section><h2>{t("What you’re moving")}</h2><p>{t("Bed slats, already packed. No loading help required.")}</p><div className="photo-row"><ItemImage type="photo" /><ItemImage type="photo" /></div></section><section className="info-split"><div><span>{t("Pickup")}</span><b>{t("Flexible · Ground floor")}</b></div><div><span>{t("Delivery")}</span><b>{t("Trešnjevka · Elevator available")}</b></div></section></div><aside><p className="eyebrow">{t("Interested")}</p><h2>{t("Make a clear offer.")}</h2><p>{t("Tell the customer your price and when you can do it.")}</p><button className="button moss full" onClick={onOffer}>{t("Make an offer")} <Arrow /></button></aside></div><button className="button moss mobile-sticky" onClick={onOffer}>{t("Make an offer")}</button></section>; }
 function MakeOffer({ onBack, onSend }: { onBack: () => void; onSend: () => void }) { const { t } = useLanguage(); return <section className="make-offer"><button className="back" onClick={onBack}>← {t("Job details")}</button><p className="eyebrow">{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p><h1>{t("Your offer")}</h1><div><label className="price-input">€<input defaultValue="32" /></label><Picker label={t("Pickup availability")} defaultValue="today" options={[{ value: "today", label: <>{t("Today")}, 17:00–19:00</> }, { value: "tomorrow", label: t("Tomorrow, 10:00–12:00") }]} ariaLabel={t("Pickup availability")} /><Picker label={t("Delivery estimate")} defaultValue="45" options={[{ value: "45", label: t("Within 45 minutes of pickup") }, { value: "60", label: t("Within 1 hour of pickup") }]} ariaLabel={t("Delivery estimate")} /><Picker label={t("Vehicle")} defaultValue="master" options={[{ value: "master", label: <>Renault Master · {t("Large van")}</> }]} ariaLabel={t("Vehicle")} /><label>{t("Message")} <em>{t("Optional")}</em><textarea defaultValue={t("I’m already driving through this area tomorrow afternoon.")} /></label><button className="button moss full" onClick={onSend}>{t("Send offer")} <Arrow /></button></div></section>; }
