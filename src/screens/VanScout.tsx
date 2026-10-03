@@ -185,7 +185,7 @@ function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: {
       text: "continue_with",
       shape: "rectangular",
       logo_alignment: "center",
-      width: Math.min(400, container.clientWidth || 400),
+      width: container.clientWidth || 400,
       locale: language,
     });
   }, [googleReady, language]);
@@ -270,6 +270,9 @@ function useHasMessages(kind?: "customer" | "carrier") {
       return;
     }
     let cancelled = false;
+    let realtimeClient: Realtime | null = null;
+    let userChannelName = "";
+    let realtimeListener: ((message: { name?: string }) => void) | null = null;
     const load = async () => {
       const token = getAuthToken();
       if (!token) {
@@ -287,49 +290,56 @@ function useHasMessages(kind?: "customer" | "carrier") {
     void load();
     const handleMessagesRead = () => void load();
     window.addEventListener("vanscout-messages-read", handleMessagesRead);
-    const timer = window.setInterval(() => void load(), 3000);
-    return () => { cancelled = true; window.removeEventListener("vanscout-messages-read", handleMessagesRead); window.clearInterval(timer); };
+    void (async () => {
+      try {
+        const user = await fetchSessionUser();
+        if (!user || cancelled) return;
+        const token = getAuthToken();
+        const statusResponse = await fetch("/api/realtime/status", { headers: { Authorization: `Bearer ${token}` } });
+        const status = await statusResponse.json() as { enabled?: boolean };
+        if (!statusResponse.ok || !status.enabled || cancelled) return;
+        const client = new Realtime({
+          autoConnect: true,
+          authCallback: async (_params, callback) => {
+            try {
+              const response = await fetch("/api/realtime/ably-token", { headers: { Authorization: `Bearer ${token}` } });
+              const payload = await response.json() as TokenRequest & { error?: string };
+              if (!response.ok) throw new Error(payload.error || "Realtime is unavailable");
+              callback(null, payload);
+            } catch (error) {
+              callback(error instanceof Error ? error.message : "Realtime is unavailable", null);
+            }
+          },
+        });
+        if (cancelled) {
+          client.close();
+          return;
+        }
+        realtimeClient = client;
+        userChannelName = `user:${user.id}`;
+        realtimeListener = message => {
+          if (message.name === "message-created") setHasMessages(true);
+        };
+        await client.channels.get(userChannelName).subscribe(realtimeListener);
+      } catch {
+        // The initial check still displays the current state when realtime is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      window.removeEventListener("vanscout-messages-read", handleMessagesRead);
+      if (realtimeClient && userChannelName && realtimeListener) realtimeClient.channels.get(userChannelName).unsubscribe(realtimeListener);
+      realtimeClient?.close();
+    };
   }, [kind]);
   return hasMessages;
-}
-
-function useHasUnreadOffers(enabled: boolean) {
-  const [hasUnreadOffers, setHasUnreadOffers] = useState(false);
-  useEffect(() => {
-    if (!enabled) {
-      setHasUnreadOffers(false);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      const token = getAuthToken();
-      if (!token) {
-        if (!cancelled) setHasUnreadOffers(false);
-        return;
-      }
-      try {
-        const response = await fetch("/api/transports?status=all", { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
-        const payload = await response.json() as { transports?: TransportRequest[] };
-        if (!cancelled && response.ok) setHasUnreadOffers((payload.transports || []).some(transport => transport.hasUnreadOffers));
-      } catch {
-        // Keep the last known dot state during temporary connection failures.
-      }
-    };
-    void load();
-    const handleOffersRead = () => void load();
-    window.addEventListener("vanscout-offers-read", handleOffersRead);
-    const timer = window.setInterval(() => void load(), 3000);
-    return () => { cancelled = true; window.removeEventListener("vanscout-offers-read", handleOffersRead); window.clearInterval(timer); };
-  }, [enabled]);
-  return hasUnreadOffers;
 }
 
 function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: string }) {
   const { t } = useLanguage();
   const hasMessages = useHasMessages(kind);
-  const hasUnreadOffers = useHasUnreadOffers(kind === "customer");
   const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["active", "Active", "/carrier/active"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]];
-  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}{hasUnreadOffers && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
+  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
 }
 function Footer() { const { t } = useLanguage(); return <footer className="footer"><div className="footer-brand"><Mark /><strong>Contact</strong><a href="mailto:info@van-scout.com">info@van-scout.com</a></div><div className="footer-legal"><strong>{t("Legal information")}</strong><Link to="/politika-privatnosti">{t("Privacy policy")}</Link><Link to="/politika-o-kolacicima">{t("Cookie policy")}</Link><Link to="/uvjeti-koristenja">{t("Terms of use")}</Link><Link to="/impressum">{t("Impressum")}</Link></div><small className="footer-copyright">{t("© 2026 VanScout. All rights reserved.")}</small></footer>; }
 function ItemImage({ type = "bed", label }: { type?: "bed" | "photo"; label?: string }) { const { t } = useLanguage(); return <div className={`item-image ${type}`}><span>{label || (type === "bed" ? <>{t("Bed")}<br />{t("slats")}</> : t("Photo"))}</span></div>; }

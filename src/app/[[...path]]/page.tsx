@@ -1,16 +1,21 @@
-"use client";
+import { cookies, headers } from "next/headers";
+import ClientPage from "./ClientPage";
+import { isLanguage, languageFromAcceptLanguage, languageFromCountry } from "../../lib/language";
 
-import { useEffect, useState } from "react";
-import App from "../../App";
-import { I18nProvider } from "../../i18n";
+function countryFromHeaders(requestHeaders: Headers) {
+  return requestHeaders.get("x-vercel-ip-country")
+    ?? requestHeaders.get("cf-ipcountry")
+    ?? requestHeaders.get("x-country-code");
+}
 
-export default function Page() {
-  const [mounted, setMounted] = useState(false);
+export default async function Page() {
+  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
+  const savedLanguage = cookieStore.get("vanscout-language")?.value;
+  const initialLanguage = isLanguage(savedLanguage)
+    ? savedLanguage
+    : languageFromCountry(countryFromHeaders(requestHeaders))
+      ?? languageFromAcceptLanguage(requestHeaders.get("accept-language"))
+      ?? "en";
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return null;
-  return <I18nProvider><App /></I18nProvider>;
+  return <ClientPage initialLanguage={initialLanguage} />;
 }

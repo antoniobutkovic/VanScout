@@ -27,7 +27,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const message = await sendMessage(id, user.id, parsed.data.body);
     if (!message) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    await publishRealtimeEvent(`chat:${id}`, "message-created", { messageId: message.id });
+    await Promise.all([
+      publishRealtimeEvent(`chat:${id}`, "message-created", { messageId: message.id }),
+      publishRealtimeEvent(`user:${message.recipientId}`, "message-created", { offerId: id, messageId: message.id }),
+    ]);
     return NextResponse.json({ message }, { status: 201 });
   } catch (error) {
     if (error instanceof InsufficientCreditsError) {

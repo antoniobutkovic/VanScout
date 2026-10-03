@@ -608,7 +608,7 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
   await ensureDatabaseSchema();
   const sql = sqlClient();
   const access = await sql`
-    SELECT offer.carrier_id, offer.price_cents, offer.status
+    SELECT offer.carrier_id, tr.requester_id, offer.price_cents, offer.status
     FROM vanscout_transport_offers offer
     JOIN vanscout_transport_requests tr ON tr.id = offer.transport_request_id
     WHERE offer.id = ${offerId} AND offer.status IN ('pending', 'confirmed')
@@ -626,5 +626,8 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
     RETURNING id, sender_id, created_at
   `;
   const row = rows[0] as Record<string, unknown>;
-  return { id: String(row.id), senderId: String(row.sender_id), body, createdAt: iso(row.created_at) };
+  const recipientId = String(access[0].carrier_id) === senderId
+    ? String(access[0].requester_id)
+    : String(access[0].carrier_id);
+  return { id: String(row.id), senderId: String(row.sender_id), recipientId, body, createdAt: iso(row.created_at) };
 }

@@ -1,7 +1,8 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { Picker } from "./components/Picker";
+import { languageFromBrowser, type Language } from "./lib/language";
 
-export type Language = "en" | "hr";
+export type { Language } from "./lib/language";
 
 type TranslationParams = Record<string, string | number>;
 
@@ -579,22 +580,30 @@ type I18nContextValue = {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
-export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<Language>("en");
+const LANGUAGE_PREFERENCE_KEY = "vanscout-language-preference";
+const LANGUAGE_COOKIE = "vanscout-language";
 
-  useEffect(() => {
-    const stored = window.localStorage.getItem("vanscout-language");
-    if (stored === "hr" || stored === "en") {
-      setLanguage(stored);
-      return;
-    }
-    const browserLanguage = window.navigator.languages?.[0] ?? window.navigator.language;
-    setLanguage(browserLanguage.toLowerCase().startsWith("hr") ? "hr" : "en");
-  }, []);
+function initialBrowserLanguage(fallback?: Language) {
+  if (typeof window === "undefined") return fallback ?? "en";
+
+  const savedLanguage = window.localStorage.getItem(LANGUAGE_PREFERENCE_KEY);
+  if (savedLanguage === "hr" || savedLanguage === "en") return savedLanguage;
+
+  return fallback ?? languageFromBrowser(window.navigator.languages, window.navigator.language);
+}
+
+export function I18nProvider({ children, initialLanguage }: { children: ReactNode; initialLanguage?: Language }) {
+  const [language, setLanguageState] = useState<Language>(() => initialBrowserLanguage(initialLanguage));
+
+  const setLanguage = (nextLanguage: Language) => {
+    setLanguageState(nextLanguage);
+    window.localStorage.setItem(LANGUAGE_PREFERENCE_KEY, nextLanguage);
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${LANGUAGE_COOKIE}=${nextLanguage}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem("vanscout-language", language);
     document.documentElement.lang = language;
     document.title = "VanScout";
     document.querySelector('meta[name="description"]')?.setAttribute("content", language === "hr" ? "Objavite što trebate prevesti i primite ponude lokalnih prijevoznika." : "Post what you need moved and receive offers from local carriers.");
