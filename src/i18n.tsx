@@ -402,6 +402,7 @@ const CROATIAN: Record<string, string> = {
   "Pickup area": "Područje preuzimanja",
   Apply: "Primijeni",
   "Select city": "Odaberite grad",
+  "Select radius": "Odaberite radijus",
   "Select pickup area": "Odaberite područje preuzimanja",
   "Pickup radius": "Radijus preuzimanja",
   "Set a point and show transports whose pickup is within your selected straight-line radius.": "Postavite točku i prikažite prijevoze čije je preuzimanje unutar odabranog radijusa zračne udaljenosti.",
