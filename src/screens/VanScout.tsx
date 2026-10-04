@@ -28,6 +28,8 @@ const OFFERS: Offer[] = [
 const CATEGORIES = ["Furniture", "Appliances", "Store purchase", "Motorcycle", "Boxes / pallets", "Other"];
 const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Review"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TRANSPORT_PAGE_SIZE = 20;
+const CARRIER_PICKUP_AREA_KEY = "vanscout-carrier-pickup-area";
 
 function Arrow() { return null; }
 function Mark() { return <Link className="brand" to="/" aria-label="VanScout home"><Image src="/vanscout-logo.png" alt="VanScout" width={2172} height={724} /></Link>; }
@@ -1045,6 +1047,14 @@ function formatShortAddress(address: string) {
   return (parts.length > 2 ? parts.slice(0, 2) : parts).join(", ");
 }
 
+function distanceBetweenCoordinates(from: { latitude: number; longitude: number }, to: { latitude: number; longitude: number }) {
+  const toRadians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDifference = toRadians(to.latitude - from.latitude);
+  const longitudeDifference = toRadians(to.longitude - from.longitude);
+  const a = Math.sin(latitudeDifference / 2) ** 2 + Math.cos(toRadians(from.latitude)) * Math.cos(toRadians(to.latitude)) * Math.sin(longitudeDifference / 2) ** 2;
+  return 6_371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function RequestRow({ request, onClick }: { request: TransportRequest; onClick: () => void }) {
   const { language, t } = useLanguage();
   const statusTone = transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo);
@@ -1423,16 +1433,71 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
   const [transports, setTransports] = useState<MarketplaceTransport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  useEffect(() => {
+  const [distanceFilter, setDistanceFilter] = useState<number | null>(null);
+  const [pickupArea, setPickupArea] = useState<AddressLocation | null>(null);
+  const [pickupRadius, setPickupRadius] = useState(25);
+  const [isPickupAreaOpen, setIsPickupAreaOpen] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadPage = useCallback(async (offset: number) => {
     const token = getAuthToken();
-    if (!token) return;
-    void fetch("/api/marketplace/transports", { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
-      const payload = await response.json() as { transports?: MarketplaceTransport[]; error?: string };
-      if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
-      setTransports(payload.transports || []);
-    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoading(false));
+    if (!token) throw new Error(t("Unable to load transports"));
+    const response = await fetch(`/api/marketplace/transports?limit=${TRANSPORT_PAGE_SIZE}&offset=${offset}`, { headers: { Authorization: `Bearer ${token}` } });
+    const payload = await response.json() as { transports?: MarketplaceTransport[]; hasMore?: boolean; error?: string };
+    if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
+    return { transports: payload.transports || [], hasMore: Boolean(payload.hasMore) };
   }, [t]);
-  return <section className="jobs"><div className="workspace-title"><div><h1>{t("Available transports")}</h1></div></div>{loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : transports.length ? transports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3>{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{t("No available transports")}</h2><p>{t("New customer requests will appear here.")}</p></div>}</section>;
+  useEffect(() => {
+    setLoading(true);
+    void loadPage(0).then(page => {
+      setTransports(page.transports);
+      setNextOffset(page.transports.length);
+      setHasMore(page.hasMore);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoading(false));
+  }, [loadPage, t]);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(CARRIER_PICKUP_AREA_KEY) || "null") as AddressLocation | null;
+      if (saved && typeof saved.formatted === "string" && Number.isFinite(saved.latitude) && Number.isFinite(saved.longitude)) setPickupArea(saved);
+    } catch {
+      window.localStorage.removeItem(CARRIER_PICKUP_AREA_KEY);
+    }
+  }, []);
+  const updatePickupArea = (location: AddressLocation | null) => {
+    setPickupArea(location);
+    if (location) window.localStorage.setItem(CARRIER_PICKUP_AREA_KEY, JSON.stringify(location));
+    else window.localStorage.removeItem(CARRIER_PICKUP_AREA_KEY);
+  };
+  const maximumRouteDistance = useMemo(() => Math.max(250, Math.ceil(Math.max(...transports.map(request => request.distanceKm)) / 10) * 10), [transports]);
+  const selectedDistance = distanceFilter ?? maximumRouteDistance;
+  const hasDistanceFilter = selectedDistance < maximumRouteDistance;
+  const hasActiveFilters = hasDistanceFilter || Boolean(pickupArea);
+  const filteredTransports = useMemo(() => transports.filter(request => {
+    if (hasDistanceFilter && request.distanceKm > selectedDistance) return false;
+    if (pickupArea && distanceBetweenCoordinates(pickupArea, request.pickup) > pickupRadius) return false;
+    return true;
+  }), [hasDistanceFilter, pickupArea, pickupRadius, selectedDistance, transports]);
+  const loadMore = () => {
+    setLoadingMore(true);
+    void loadPage(nextOffset).then(page => {
+      setTransports(current => [...current, ...page.transports.filter(transport => !current.some(existing => existing.id === transport.id))]);
+      setNextOffset(current => current + page.transports.length);
+      setHasMore(page.hasMore);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoadingMore(false));
+  };
+  return <section className="jobs">
+    <div className="workspace-title jobs-title">
+      <h1>{t("Available transports")}</h1>
+      <div className="job-header-filters">
+        <label className="job-filter-field job-distance-filter"><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => setDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /></label>
+        <button type="button" className="pickup-area-trigger" onClick={() => setIsPickupAreaOpen(open => !open)} aria-expanded={isPickupAreaOpen}><span>{t("Pickup area")}</span><b>{pickupArea ? formatShortAddress(pickupArea.formatted) : t("Select pickup area")}</b></button>
+      </div>
+    </div>
+    {isPickupAreaOpen && <section className="pickup-area-panel"><div className="pickup-area-panel-heading"><div><h2>{t("Pickup area")}</h2><p>{t("Set a point and show transports whose pickup is within your selected straight-line radius.")}</p></div><button type="button" className="pickup-area-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={pickupArea} onChange={updatePickupArea} precisionHint={t("Click or move the map to choose the centre of your pickup area.")} /><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: pickupRadius })}</strong></span><input type="range" min="5" max="100" step="5" value={pickupRadius} onChange={event => setPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: pickupRadius })} /></label>{pickupArea && <button type="button" className="quiet-link" onClick={() => updatePickupArea(null)}>{t("Clear location")}</button>}</div></section>}
+    {loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}
+    {hasMore && <button type="button" className="button dark load-more-transports" disabled={loadingMore} onClick={loadMore}>{loadingMore ? t("Loading more…") : t("Load more")}</button>}
+  </section>;
 }
 
 function RealJobDetail({ request, onBack, onOffer }: { request: MarketplaceTransport; onBack: () => void; onOffer: () => void }) {

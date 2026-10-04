@@ -39,7 +39,7 @@ const transportColumns = `
   COALESCE((SELECT ARRAY_AGG(image.id ORDER BY image.position) FROM vanscout_request_draft_images image WHERE image.transport_request_id = tr.id), ARRAY[]::text[]) AS image_ids
 `;
 
-export async function listMarketplaceTransports(carrierId: string): Promise<MarketplaceTransport[]> {
+export async function listMarketplaceTransports(carrierId: string, { limit = 20, offset = 0 }: { limit?: number; offset?: number } = {}) {
   await ensureDatabaseSchema();
   const sql = sqlClient();
   const rows = await sql.query(`
@@ -60,9 +60,10 @@ export async function listMarketplaceTransports(carrierId: string): Promise<Mark
     LEFT JOIN vanscout_carrier_profiles profile ON profile.carrier_id = mine.carrier_id
     LEFT JOIN vanscout_transport_selections selection ON selection.transport_request_id = tr.id
     WHERE tr.status = 'looking_for_carriers'
-    ORDER BY tr.created_at DESC
-  `, [carrierId]);
-  return rows.map(raw => {
+    ORDER BY tr.created_at DESC, tr.id DESC
+    LIMIT $2 OFFSET $3
+  `, [carrierId, limit + 1, offset]);
+  const transports = rows.slice(0, limit).map(raw => {
     const row = raw as Record<string, unknown>;
     return {
       ...toTransportRequest(row),
@@ -71,6 +72,7 @@ export async function listMarketplaceTransports(carrierId: string): Promise<Mark
       myOffer: row.offer_id ? toOffer(row) : null,
     };
   });
+  return { transports, hasMore: rows.length > limit };
 }
 
 export async function createOrUpdateOffer(carrier: AppUser, transportId: string, input: { priceCents: number; vatIncluded: boolean; availableDate: string; message: string }): Promise<(TransportOffer & { requesterId: string }) | null> {
