@@ -400,6 +400,7 @@ const CROATIAN: Record<string, string> = {
   "View job": "Pogledaj posao",
   Flexible: "Fleksibilno",
   "Pickup area": "Područje preuzimanja",
+  Apply: "Primijeni",
   "Select city": "Odaberite grad",
   "Select pickup area": "Odaberite područje preuzimanja",
   "Pickup radius": "Radijus preuzimanja",

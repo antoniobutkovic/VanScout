@@ -1438,6 +1438,8 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
   const [distanceFilter, setDistanceFilter] = useState<number | null>(null);
   const [pickupArea, setPickupArea] = useState<AddressLocation | null>(null);
   const [pickupRadius, setPickupRadius] = useState(25);
+  const [draftPickupArea, setDraftPickupArea] = useState<AddressLocation | null>(null);
+  const [draftPickupRadius, setDraftPickupRadius] = useState(25);
   const [isPickupAreaOpen, setIsPickupAreaOpen] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -1477,6 +1479,16 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     if (location) window.localStorage.setItem(CARRIER_PICKUP_AREA_KEY, JSON.stringify(location));
     else window.localStorage.removeItem(CARRIER_PICKUP_AREA_KEY);
   };
+  const openPickupAreaDialog = () => {
+    setDraftPickupArea(pickupArea);
+    setDraftPickupRadius(pickupRadius);
+    setIsPickupAreaOpen(true);
+  };
+  const applyPickupArea = () => {
+    updatePickupArea(draftPickupArea);
+    setPickupRadius(draftPickupRadius);
+    setIsPickupAreaOpen(false);
+  };
   const maximumRouteDistance = useMemo(() => Math.max(250, Math.ceil(Math.max(...transports.map(request => request.distanceKm)) / 10) * 10), [transports]);
   const selectedDistance = distanceFilter ?? maximumRouteDistance;
   const hasDistanceFilter = selectedDistance < maximumRouteDistance;
@@ -1500,10 +1512,10 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
       <h1>{t("Available transports")}</h1>
       <div className="job-header-filters">
         <label className="job-filter-field job-distance-filter"><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => setDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /></label>
-        <button type="button" className="pickup-area-trigger" onClick={() => setIsPickupAreaOpen(open => !open)} aria-expanded={isPickupAreaOpen} aria-label={t("Pickup area")}><b>{pickupAreaSummary}</b></button>
+        <button type="button" className="pickup-area-trigger" onClick={openPickupAreaDialog} aria-expanded={isPickupAreaOpen} aria-label={t("Pickup area")}><b>{pickupAreaSummary}</b></button>
       </div>
     </div>
-    {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Pickup area")}><div className="pickup-area-panel-heading"><button type="button" className="pickup-area-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={pickupArea} onChange={updatePickupArea} showSearch={false} /><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: pickupRadius })}</strong></span><input type="range" min="5" max="100" step="5" value={pickupRadius} onChange={event => setPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: pickupRadius })} /></label>{pickupArea && <button type="button" className="quiet-link" onClick={() => updatePickupArea(null)}>{t("Clear location")}</button>}</div></section></div>}
+    {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Pickup area")}><div className="pickup-area-panel-heading"><button type="button" className="pickup-area-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: draftPickupRadius })}</strong></span><input type="range" min="5" max="100" step="5" value={draftPickupRadius} onChange={event => setDraftPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: draftPickupRadius })} /></label></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={draftPickupArea} onChange={setDraftPickupArea} showSearch={false} /><div className="pickup-area-actions">{draftPickupArea && <button type="button" className="quiet-link" onClick={() => setDraftPickupArea(null)}>{t("Clear location")}</button>}<button type="button" className="button moss pickup-area-apply" onClick={applyPickupArea}>{t("Apply")}</button></div></section></div>}
     {loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}
     {hasMore && <button type="button" className="button dark load-more-transports" disabled={loadingMore} onClick={loadMore}>{loadingMore ? t("Loading more…") : t("Load more")}</button>}
   </section>;
