@@ -208,13 +208,26 @@ async function ensureSchema() {
           carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
           amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
           currency TEXT NOT NULL DEFAULT 'eur' CHECK (currency = 'eur'),
+          billing_recipient_type TEXT NOT NULL DEFAULT 'personal' CHECK (billing_recipient_type IN ('personal', 'company')),
           status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'expired')),
           stripe_checkout_session_id TEXT UNIQUE,
+          stripe_customer_id TEXT,
           stripe_payment_intent_id TEXT,
+          stripe_invoice_id TEXT,
+          stripe_hosted_invoice_url TEXT,
+          stripe_invoice_pdf_url TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           paid_at TIMESTAMPTZ
         )
       `;
+      // Keep the initial credit-purchase table compatible with the invoicing
+      // flow. Invoice recipient details live in Stripe, which is the system of
+      // record for the issued invoice; we only retain Stripe identifiers/links.
+      await sql`ALTER TABLE vanscout_credit_purchases ADD COLUMN IF NOT EXISTS billing_recipient_type TEXT NOT NULL DEFAULT 'personal' CHECK (billing_recipient_type IN ('personal', 'company'))`;
+      await sql`ALTER TABLE vanscout_credit_purchases ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT`;
+      await sql`ALTER TABLE vanscout_credit_purchases ADD COLUMN IF NOT EXISTS stripe_invoice_id TEXT`;
+      await sql`ALTER TABLE vanscout_credit_purchases ADD COLUMN IF NOT EXISTS stripe_hosted_invoice_url TEXT`;
+      await sql`ALTER TABLE vanscout_credit_purchases ADD COLUMN IF NOT EXISTS stripe_invoice_pdf_url TEXT`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_credit_transactions (
           id TEXT PRIMARY KEY,

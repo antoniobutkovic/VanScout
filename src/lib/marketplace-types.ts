@@ -74,6 +74,8 @@ export type CreditTransaction = {
   amountCents: number;
   kind: "purchase" | "commission" | "refund" | "adjustment";
   description: string;
+  invoiceUrl: string | null;
+  invoicePdfUrl: string | null;
   createdAt: string;
 };
 

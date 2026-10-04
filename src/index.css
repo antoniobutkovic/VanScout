@@ -27,7 +27,7 @@ img { display: block; max-width: 100%; }
 
 h1, h2, h3, p { margin-top: 0; }
 h1, h2, h3 { letter-spacing: -0.055em; }
-h1 { font-size: clamp(3.25rem, 6vw, 6.2rem); line-height: .91; font-weight: 750; }
+h1 { font-size: clamp(1.625rem, 3vw, 3.1rem); line-height: .91; font-weight: 750; }
 h2 { font-size: clamp(2.1rem, 3.4vw, 3.8rem); line-height: .96; }
 h3 { font-size: 1.25rem; margin-bottom: 8px; }
 p { line-height: 1.5; color: var(--muted); }
@@ -173,7 +173,7 @@ p { line-height: 1.5; color: var(--muted); }
 .wizard-progress .current { color: var(--ink); font-weight: 800; }
 .wizard > main { width: min(100%, 800px); margin: 0 auto; padding: 70px 22px 0; }
 .wizard section { width: 100%; max-width: 700px; margin: 0 auto; }
-.wizard h1 { font-size: clamp(2.9rem, 5vw, 4.65rem); margin-bottom: 40px; }
+.wizard h1 { font-size: clamp(1.45rem, 2.5vw, 2.325rem); margin-bottom: 40px; }
 .wizard label, .auth label, .make-offer label { display: grid; gap: 8px; font-size: 12px; font-weight: 800; margin-top: 20px; }
 .field-label { display: inline-flex; align-items: baseline; gap: 4px; }
 .wizard label em, .auth label em, .make-offer em { font-style: normal; color: var(--muted); font-weight: 600; }
@@ -270,7 +270,7 @@ textarea { min-height: 105px; resize: vertical; }
 .role-option-icon { width: 38px; height: 38px; display: grid; place-items: center; background: var(--sage); color: var(--moss); }
 .role-option.selected .role-option-icon { background: var(--white); }
 .role-option-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.auth h1 { font-size: clamp(2.85rem,5.3vw,4.35rem); margin-bottom: 25px; }
+.auth h1 { font-size: clamp(1.425rem,2.65vw,2.175rem); margin-bottom: 25px; }
 .auth > main > p:not(.eyebrow) { margin-bottom: 27px; }
 .auth label { margin-bottom: 3px; }
 .auth-form { display: grid; }
@@ -374,7 +374,7 @@ textarea { min-height: 105px; resize: vertical; }
 .offer-price-breakdown.compact small { font-size: 9px; }
 .request-detail > header, .job-detail > header, .vehicles > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; margin-bottom: 42px; }
 .request-detail > header h1, .job-detail > header h1 { margin: 0 0 11px; }
-.job-detail > header h1 { font-size: clamp(3.2rem, 5vw, 5rem); }
+.job-detail > header h1 { font-size: clamp(1.6rem, 2.5vw, 2.5rem); }
 .job-detail > header { margin-bottom: 12px; }
 .job-detail > header h1 { margin-bottom: 0; }
 .request-detail > header p:not(.eyebrow), .job-detail > header p:not(.eyebrow) { margin: 0; font-size: 18px; color: var(--ink); font-weight: 650; }
@@ -423,7 +423,7 @@ dd { margin: 0; font-size: 13px; font-weight: 700; }
 .close { position: absolute; top: 19px; right: 23px; font-size: 27px; background: transparent; border: 0; }
 .profile-head { display: flex; gap: 18px; align-items: center; }
 .profile-head h2 { font-size: 31px; margin: 3px 0 6px; }
-.profile-head h1 { font-size: 45px; margin: 2px 0 7px; }
+.profile-head h1 { font-size: 22.5px; margin: 2px 0 7px; }
 .profile-head p { margin: 0; font-size: 13px; }
 .side > p { margin: 27px 0; font-size: 15px; }
 .side section { margin: 29px 0; }
@@ -492,6 +492,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .messages form { padding: 14px; display: grid; grid-template-columns: 1fr 42px; gap: 8px; border-top: 1px solid var(--stone); }
 .messages form input { padding: 10px 12px; }
 .messages form button { border: 0; background: var(--moss); color: var(--white); font-size: 18px; }
+.messages form button:disabled { cursor: not-allowed; opacity: .35; }
 .conversation-closed { margin: 0; padding: 16px 20px; border-top: 1px solid var(--stone); color: var(--muted); font-size: 12px; }
 .conversation-credit-lock { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-top: 1px solid var(--stone); background: var(--clay-soft); color: var(--ink); font-size: 12px; font-weight: 700; }
 
@@ -508,7 +509,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 
 .tracking > header { height: 72px; padding: 0 clamp(22px,5.5vw,88px); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--stone); font-size: 12px; color: var(--muted); }
 .tracking main { max-width: 820px; margin: 0 auto; padding: 62px 22px 100px; }
-.tracking h1 { font-size: clamp(3.1rem,6vw,5rem); margin-bottom: 33px; }
+.tracking h1 { font-size: clamp(1.55rem,3vw,2.5rem); margin-bottom: 33px; }
 .tracking-map, .active-map { position: relative; height: 330px; overflow: hidden; background: #dfe3d2; display: grid; place-items: center; }
 .tracking-map .route-line { position: absolute; z-index: 1; width: 62%; transform: rotate(-25deg); }
 .tracking-map > i, .active-map > i { z-index: 2; color: var(--moss); font-style: normal; position: absolute; font-size: 25px; left: 51%; top: 39%; }
@@ -531,6 +532,10 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .job > div:nth-child(2) p { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job > div:nth-child(2) > span:not(.status) { color: var(--muted); font-size: 11px; }
 .job > b { color: var(--moss); font-size: 12px; }
+.list-item-link { cursor: pointer; transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
+.list-item-link:hover { border-color: var(--moss); background: var(--white); box-shadow: 0 5px 16px rgba(28,33,27,.08); transform: translateY(-1px); }
+.list-item-link:focus-visible { outline: 3px solid rgba(53,74,46,.28); outline-offset: 2px; }
+.list-item-status { justify-self: end; }
 .job.compact { width: 100%; grid-template-columns: 75px 1fr auto; background: var(--white); }
 .job.compact .item-image { width: 75px; height: 75px; }
 
@@ -592,7 +597,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .image-lightbox-close { position: absolute; z-index: 1; top: 12px; right: 12px; display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid rgba(255,255,255,.45); border-radius: 50%; color: white; background: rgba(20, 24, 20, .78); cursor: pointer; font-size: 28px; line-height: 1; }
 .price-input { display: flex !important; align-items: center; gap: 6px; font-size: 52px !important; letter-spacing: -.06em; line-height: 1; margin: 0 0 20px !important; }
 .price-input input { padding: 0; border: 0; background: transparent; font-size: 52px; letter-spacing: -.06em; }
-.my-offers > article { grid-template-columns: 100px 1fr auto auto auto; }
+.my-offers > article { grid-template-columns: 100px 1fr auto auto; }
 .my-offers > article > strong { font-size: 24px; letter-spacing: -.05em; }
 .carrier-offer-price { max-width: 190px; text-align: right; }
 
@@ -624,6 +629,15 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .checkout > div input { width: 100%; padding: 10px 5px; border: 0; background: transparent; font: inherit; }
 .checkout > label { margin-bottom: 15px; }
 .checkout > .button { width: 100%; max-width: 280px; margin-top: 16px; }
+.billing-recipient { display: flex; flex-wrap: wrap; gap: 12px 18px; max-width: 480px; margin: 18px 0 0; padding: 0; border: 0; }
+.billing-recipient legend { width: 100%; margin-bottom: 2px; font-size: 12px; font-weight: 800; }
+.billing-recipient label { display: inline-flex; align-items: center; gap: 6px; min-height: auto; padding: 0; border: 0; background: transparent; font-size: 13px; font-weight: 700; }
+.billing-recipient input { width: auto; margin: 0; accent-color: var(--moss); }
+.company-invoice-fields { display: grid; gap: 12px; max-width: 360px; margin-top: 16px; }
+.company-invoice-fields label { display: grid; gap: 6px; font-size: 12px; font-weight: 800; }
+.company-invoice-fields input { min-height: 44px; padding: 9px 11px; border: 1px solid var(--stone); background: var(--white); font: inherit; }
+.company-invoice-fields .field-hint { margin: -3px 0 0; }
+.invoice-link { display: block; width: max-content; margin-top: 4px; color: var(--moss); font-size: 12px; font-weight: 800; }
 .activity { margin-top: 55px; }
 .activity h2 { font-size: 27px; margin-bottom: 14px; }
 .activity > div { padding: 15px 0; border-top: 1px solid var(--stone); display: flex; justify-content: space-between; }
@@ -681,7 +695,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 }
 
 @media (max-width: 680px) {
-  h1 { font-size: clamp(2.85rem, 14vw, 4rem); }
+  h1 { font-size: clamp(1.425rem, 7vw, 2rem); }
   .topbar { padding: 0 18px; grid-template-columns: 1fr auto; }
   .topbar nav { display: none; }
   .nav-actions { gap: 11px; }
@@ -729,7 +743,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
   .wizard-progress b { left: 18px; }
   .wizard-progress span.current { font-size: 11px; }
   .wizard > main { padding: 42px 18px 0; }
-  .wizard h1 { font-size: 42px; margin-bottom: 30px; }
+  .wizard h1 { font-size: 21px; margin-bottom: 30px; }
   .choices { grid-template-columns: repeat(2,1fr); }
   .route-summary { grid-template-columns: 1fr; gap: 12px; padding: 20px; }
   .route-summary .route-line { width: 100%; }
@@ -745,7 +759,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
   .phone-input-row { grid-template-columns: 128px minmax(0, 1fr); }
   .workspace { padding: 43px 18px 80px; }
   .workspace-title { align-items: flex-start; flex-direction: column; margin-bottom: 28px; }
-  .workspace-title h1 { font-size: 45px; }
+  .workspace-title h1 { font-size: 22.5px; }
   .business-images-field { align-items: flex-start; flex-direction: column; }
   .carrier-image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .request-row, .job, .my-offers article { grid-template-columns: 70px 1fr auto; gap: 12px; padding: 11px; }
@@ -795,7 +809,8 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
   .offer.live-offer.customer-live-offer .offer-time { grid-column: 1; grid-row: 2; }
   .offer.live-offer.customer-live-offer .price { grid-column: 2; grid-row: 1 / span 2; }
   .real-job-facts { grid-template-columns: 1fr; }
-  .my-offers > article .status { display: none; }
+  .my-offers > article .carrier-offer-price { display: none; }
+  .my-offers > article .status { display: inline-flex; grid-column: 3; grid-row: 1 / span 2; }
   .active-meta { grid-template-columns: 1fr; }
   .active-map { height: 190px; }
   .share { gap: 15px; }
