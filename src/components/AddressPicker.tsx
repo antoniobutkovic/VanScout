@@ -9,6 +9,7 @@ type AddressPickerProps = {
   onChange: (location: AddressLocation | null) => void;
   precisionHint?: string;
   showSearch?: boolean;
+  radiusKm?: number;
 };
 
 const ZAGREB: [number, number] = [15.9819, 45.8150];
@@ -17,7 +18,22 @@ function resultSecondaryLine(result: AddressLocation) {
   return [result.addressLine1, result.addressLine2, result.city, result.postcode].filter(Boolean).join(" · ");
 }
 
-export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true }: AddressPickerProps) {
+function radiusCircle(location: AddressLocation, radiusKm: number) {
+  const earthRadiusKm = 6371;
+  const latitude = location.latitude * Math.PI / 180;
+  const longitude = location.longitude * Math.PI / 180;
+  const angularDistance = radiusKm / earthRadiusKm;
+  const coordinates: [number, number][] = [];
+  for (let point = 0; point <= 72; point += 1) {
+    const bearing = point / 72 * Math.PI * 2;
+    const nextLatitude = Math.asin(Math.sin(latitude) * Math.cos(angularDistance) + Math.cos(latitude) * Math.sin(angularDistance) * Math.cos(bearing));
+    const nextLongitude = longitude + Math.atan2(Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitude), Math.cos(angularDistance) - Math.sin(latitude) * Math.sin(nextLatitude));
+    coordinates.push([nextLongitude * 180 / Math.PI, nextLatitude * 180 / Math.PI]);
+  }
+  return { type: "Feature" as const, properties: {}, geometry: { type: "Polygon" as const, coordinates: [coordinates] } };
+}
+
+export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true, radiusKm }: AddressPickerProps) {
   const { t } = useLanguage();
   const [query, setQuery] = useState(value?.formatted || "");
   const [results, setResults] = useState<AddressLocation[]>([]);
@@ -25,6 +41,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
   const [isResolving, setIsResolving] = useState(false);
   const [error, setError] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [isMapReady, setIsMapReady] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
@@ -100,6 +117,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
       nextMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       map = nextMap;
       mapRef.current = nextMap;
+      nextMap.on("load", () => setIsMapReady(true));
     });
 
     return () => {
@@ -112,8 +130,36 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
   useEffect(() => {
     if (!value || !mapRef.current) return;
     const coordinates: [number, number] = [value.longitude, value.latitude];
-    mapRef.current.flyTo({ center: coordinates, zoom: Math.max(mapRef.current.getZoom(), 16), essential: true, duration: 550 });
-  }, [value?.latitude, value?.longitude]);
+    if (radiusKm) {
+      const latitudeOffset = radiusKm / 111.32;
+      const longitudeOffset = radiusKm / (111.32 * Math.cos(value.latitude * Math.PI / 180));
+      mapRef.current.fitBounds([[value.longitude - longitudeOffset, value.latitude - latitudeOffset], [value.longitude + longitudeOffset, value.latitude + latitudeOffset]], { padding: 46, maxZoom: 14, essential: true, duration: 550 });
+    } else {
+      mapRef.current.flyTo({ center: coordinates, zoom: Math.max(mapRef.current.getZoom(), 16), essential: true, duration: 550 });
+    }
+  }, [radiusKm, value?.latitude, value?.longitude]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) return;
+    const sourceId = "address-picker-radius";
+    const fillLayerId = "address-picker-radius-fill";
+    const outlineLayerId = "address-picker-radius-outline";
+    if (!value || !radiusKm) {
+      if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId);
+      if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      return;
+    }
+    const data = radiusCircle(value, radiusKm);
+    const source = map.getSource(sourceId) as import("maplibre-gl").GeoJSONSource | undefined;
+    if (source) source.setData(data);
+    else {
+      map.addSource(sourceId, { type: "geojson", data });
+      map.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": "#48623d", "fill-opacity": .16 } });
+      map.addLayer({ id: outlineLayerId, type: "line", source: sourceId, paint: { "line-color": "#365031", "line-width": 2, "line-opacity": .8 } });
+    }
+  }, [isMapReady, radiusKm, value?.latitude, value?.longitude]);
 
   useEffect(() => {
     const text = query.trim();
