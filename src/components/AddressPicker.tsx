@@ -9,6 +9,7 @@ type AddressPickerProps = {
   onChange: (location: AddressLocation | null) => void;
   precisionHint?: string;
   showSearch?: boolean;
+  showCurrentLocation?: boolean;
   radiusKm?: number;
 };
 
@@ -40,7 +41,7 @@ function updateRadiusLayer(map: import("maplibre-gl").Map, location: AddressLoca
   if (source) source.setData(location && radiusKm ? radiusCircle(location, radiusKm) : EMPTY_RADIUS_DATA);
 }
 
-export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true, radiusKm }: AddressPickerProps) {
+export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true, showCurrentLocation = true, radiusKm }: AddressPickerProps) {
   const { t } = useLanguage();
   const [query, setQuery] = useState(value?.formatted || "");
   const [results, setResults] = useState<AddressLocation[]>([]);
@@ -262,10 +263,10 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
     {showSearch && isSearching && <p className="address-picker-status" role="status">{t("Searching addresses…")}</p>}
     {showSearch && results.length > 0 && <div id="location-suggestions" className="address-picker-results" role="listbox" aria-label={t("Search address or place")}>{results.map((result, index) => <button type="button" role="option" aria-selected={activeIndex === index} id={`location-suggestion-${index}`} className={activeIndex === index ? "active" : ""} key={`${result.placeId || result.formatted}-${result.latitude}-${result.longitude}`} onMouseDown={event => event.preventDefault()} onClick={() => selectLocation(result)}><span className="address-picker-result-icon" aria-hidden="true">⌖</span><span><b>{result.formatted}</b>{resultSecondaryLine(result) && <small>{resultSecondaryLine(result)}</small>}</span></button>)}</div>}
     {showSearch && !isSearching && query.trim().length >= 3 && !value && results.length === 0 && !error && <p className="address-picker-status">{t("No matching addresses found")}</p>}
-    <div className="address-picker-actions">
+    {showCurrentLocation && <div className="address-picker-actions">
       <button type="button" className="address-picker-location-button" onClick={useCurrentLocation} disabled={isResolving}>{isResolving ? t("Finding your location…") : t("Use my location")}</button>
       {showSearch && <span>{t("Search powered by Geoapify")}</span>}
-    </div>
+    </div>}
     <div className="address-picker-map-shell">
       <div ref={mapContainerRef} className="address-picker-map" aria-label={t("Map for selecting an exact location")} />
       <span className="address-picker-pin" aria-hidden="true"><svg viewBox="0 0 40 50"><path d="M20 2C10.06 2 2 10.06 2 20c0 13.5 18 28 18 28s18-14.5 18-28C38 10.06 29.94 2 20 2Z" /><circle cx="20" cy="20" r="6" /></svg></span>
