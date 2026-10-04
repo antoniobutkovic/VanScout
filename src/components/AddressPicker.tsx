@@ -128,7 +128,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
   }, []);
 
   useEffect(() => {
-    if (!value || !mapRef.current) return;
+    if (!value || !mapRef.current || !isMapReady) return;
     const coordinates: [number, number] = [value.longitude, value.latitude];
     if (radiusKm) {
       const latitudeOffset = radiusKm / 111.32;
@@ -137,7 +137,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
     } else {
       mapRef.current.flyTo({ center: coordinates, zoom: Math.max(mapRef.current.getZoom(), 16), essential: true, duration: 550 });
     }
-  }, [radiusKm, value?.latitude, value?.longitude]);
+  }, [isMapReady, radiusKm, value?.latitude, value?.longitude]);
 
   useEffect(() => {
     const map = mapRef.current;
