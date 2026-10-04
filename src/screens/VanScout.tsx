@@ -1481,6 +1481,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
   const selectedDistance = distanceFilter ?? maximumRouteDistance;
   const hasDistanceFilter = selectedDistance < maximumRouteDistance;
   const hasActiveFilters = hasDistanceFilter || Boolean(pickupArea);
+  const pickupAreaSummary = `${pickupArea?.city || t("Select city")} · ${pickupRadius} km`;
   const filteredTransports = useMemo(() => transports.filter(request => {
     if (hasDistanceFilter && request.distanceKm > selectedDistance) return false;
     if (pickupArea && distanceBetweenCoordinates(pickupArea, request.pickup) > pickupRadius) return false;
@@ -1499,7 +1500,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
       <h1>{t("Available transports")}</h1>
       <div className="job-header-filters">
         <label className="job-filter-field job-distance-filter"><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => setDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /></label>
-        <button type="button" className="pickup-area-trigger" onClick={() => setIsPickupAreaOpen(open => !open)} aria-expanded={isPickupAreaOpen}><span>{t("Pickup area")}</span><b>{pickupArea ? formatShortAddress(pickupArea.formatted) : t("Select pickup area")}</b></button>
+        <button type="button" className="pickup-area-trigger" onClick={() => setIsPickupAreaOpen(open => !open)} aria-expanded={isPickupAreaOpen} aria-label={t("Pickup area")}><b>{pickupAreaSummary}</b></button>
       </div>
     </div>
     {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Pickup area")}><div className="pickup-area-panel-heading"><button type="button" className="pickup-area-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={pickupArea} onChange={updatePickupArea} showSearch={false} /><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: pickupRadius })}</strong></span><input type="range" min="5" max="100" step="5" value={pickupRadius} onChange={event => setPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: pickupRadius })} /></label>{pickupArea && <button type="button" className="quiet-link" onClick={() => updatePickupArea(null)}>{t("Clear location")}</button>}</div></section></div>}
