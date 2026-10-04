@@ -13,6 +13,7 @@ type AddressPickerProps = {
 };
 
 const ZAGREB: [number, number] = [15.9819, 45.8150];
+const EMPTY_RADIUS_DATA = { type: "FeatureCollection" as const, features: [] };
 
 function resultSecondaryLine(result: AddressLocation) {
   return [result.addressLine1, result.addressLine2, result.city, result.postcode].filter(Boolean).join(" · ");
@@ -35,22 +36,8 @@ function radiusCircle(location: AddressLocation, radiusKm: number) {
 
 function updateRadiusLayer(map: import("maplibre-gl").Map, location: AddressLocation | null, radiusKm?: number) {
   const sourceId = "address-picker-radius";
-  const fillLayerId = "address-picker-radius-fill";
-  const outlineLayerId = "address-picker-radius-outline";
-  if (!location || !radiusKm) {
-    if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId);
-    if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
-    return;
-  }
-  const data = radiusCircle(location, radiusKm);
   const source = map.getSource(sourceId) as import("maplibre-gl").GeoJSONSource | undefined;
-  if (source) source.setData(data);
-  else {
-    map.addSource(sourceId, { type: "geojson", data });
-    map.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": "#48623d", "fill-opacity": .24 } });
-    map.addLayer({ id: outlineLayerId, type: "line", source: sourceId, paint: { "line-color": "#284723", "line-width": 3, "line-opacity": .95 } });
-  }
+  if (source) source.setData(location && radiusKm ? radiusCircle(location, radiusKm) : EMPTY_RADIUS_DATA);
 }
 
 export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true, radiusKm }: AddressPickerProps) {
@@ -122,8 +109,13 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
               tileSize: 256,
               attribution: "© <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors · <a href=\"https://www.geoapify.com/\" target=\"_blank\" rel=\"noreferrer\">Geoapify</a>",
             },
+            "address-picker-radius": { type: "geojson", data: EMPTY_RADIUS_DATA },
           },
-          layers: [{ id: "geoapify", type: "raster", source: "geoapify" }],
+          layers: [
+            { id: "geoapify", type: "raster", source: "geoapify" },
+            { id: "address-picker-radius-fill", type: "fill", source: "address-picker-radius", paint: { "fill-color": "#48623d", "fill-opacity": .24 } },
+            { id: "address-picker-radius-outline", type: "line", source: "address-picker-radius", paint: { "line-color": "#284723", "line-width": 3, "line-opacity": .95 } },
+          ],
         },
         center: [initialLongitude, initialLatitude],
         zoom: initialLocation ? 16 : 11,
