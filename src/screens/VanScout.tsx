@@ -1516,7 +1516,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     <div className="workspace-title jobs-title">
       <h1>{t("Available transports")}</h1>
       <div className="job-header-filters">
-        <label className="job-filter-field job-distance-filter"><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => setDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /></label>
+        <label className="job-filter-field job-distance-filter transport-length-filter"><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => setDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span></label>
         <button type="button" className="pickup-area-trigger" onClick={openPickupAreaDialog} aria-expanded={isPickupAreaOpen} aria-label={t("Pickup area")}><b>{pickupAreaSummary}</b></button>
       </div>
     </div>
