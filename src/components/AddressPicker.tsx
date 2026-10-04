@@ -8,6 +8,7 @@ type AddressPickerProps = {
   value: AddressLocation | null;
   onChange: (location: AddressLocation | null) => void;
   precisionHint?: string;
+  showSearch?: boolean;
 };
 
 const ZAGREB: [number, number] = [15.9819, 45.8150];
@@ -16,7 +17,7 @@ function resultSecondaryLine(result: AddressLocation) {
   return [result.addressLine1, result.addressLine2, result.city, result.postcode].filter(Boolean).join(" · ");
 }
 
-export function AddressPicker({ label, placeholder, value, onChange, precisionHint }: AddressPickerProps) {
+export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true }: AddressPickerProps) {
   const { t } = useLanguage();
   const [query, setQuery] = useState(value?.formatted || "");
   const [results, setResults] = useState<AddressLocation[]>([]);
@@ -116,7 +117,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
 
   useEffect(() => {
     const text = query.trim();
-    if (text.length < 3 || text === value?.formatted) {
+    if (!showSearch || text.length < 3 || text === value?.formatted) {
       setResults([]);
       setIsSearching(false);
       return;
@@ -147,7 +148,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
       controller.abort();
       window.clearTimeout(timeout);
     };
-  }, [query, t, value?.formatted]);
+  }, [query, showSearch, t, value?.formatted]);
 
   const onInputChange = (nextQuery: string) => {
     setQuery(nextQuery);
@@ -190,7 +191,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
 
   const selected = Boolean(value);
   return <div className={`address-picker ${selected ? "has-location" : ""}`}>
-    <label className="address-picker-search">
+    {showSearch && <label className="address-picker-search">
       <span>{label}</span>
       <div className="address-picker-input-wrap">
         <span className="address-picker-search-icon" aria-hidden="true">⌕</span>
@@ -210,13 +211,13 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
         />
         {query && <button type="button" className="address-picker-clear" onClick={() => { onInputChange(""); inputRef.current?.focus(); }} aria-label={t("Clear location")}>×</button>}
       </div>
-    </label>
-    {isSearching && <p className="address-picker-status" role="status">{t("Searching addresses…")}</p>}
-    {results.length > 0 && <div id="location-suggestions" className="address-picker-results" role="listbox" aria-label={t("Search address or place")}>{results.map((result, index) => <button type="button" role="option" aria-selected={activeIndex === index} id={`location-suggestion-${index}`} className={activeIndex === index ? "active" : ""} key={`${result.placeId || result.formatted}-${result.latitude}-${result.longitude}`} onMouseDown={event => event.preventDefault()} onClick={() => selectLocation(result)}><span className="address-picker-result-icon" aria-hidden="true">⌖</span><span><b>{result.formatted}</b>{resultSecondaryLine(result) && <small>{resultSecondaryLine(result)}</small>}</span></button>)}</div>}
-    {!isSearching && query.trim().length >= 3 && !value && results.length === 0 && !error && <p className="address-picker-status">{t("No matching addresses found")}</p>}
+    </label>}
+    {showSearch && isSearching && <p className="address-picker-status" role="status">{t("Searching addresses…")}</p>}
+    {showSearch && results.length > 0 && <div id="location-suggestions" className="address-picker-results" role="listbox" aria-label={t("Search address or place")}>{results.map((result, index) => <button type="button" role="option" aria-selected={activeIndex === index} id={`location-suggestion-${index}`} className={activeIndex === index ? "active" : ""} key={`${result.placeId || result.formatted}-${result.latitude}-${result.longitude}`} onMouseDown={event => event.preventDefault()} onClick={() => selectLocation(result)}><span className="address-picker-result-icon" aria-hidden="true">⌖</span><span><b>{result.formatted}</b>{resultSecondaryLine(result) && <small>{resultSecondaryLine(result)}</small>}</span></button>)}</div>}
+    {showSearch && !isSearching && query.trim().length >= 3 && !value && results.length === 0 && !error && <p className="address-picker-status">{t("No matching addresses found")}</p>}
     <div className="address-picker-actions">
       <button type="button" className="address-picker-location-button" onClick={useCurrentLocation} disabled={isResolving}>{isResolving ? t("Finding your location…") : t("Use my location")}</button>
-      <span>{t("Search powered by Geoapify")}</span>
+      {showSearch && <span>{t("Search powered by Geoapify")}</span>}
     </div>
     <div className="address-picker-map-shell">
       <div ref={mapContainerRef} className="address-picker-map" aria-label={t("Map for selecting an exact location")} />
