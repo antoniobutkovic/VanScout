@@ -6,6 +6,42 @@ export type SessionUser = {
   phoneVerified: boolean;
 };
 
+let redirectingForExpiredSession = false;
+let sessionExpiryHandlerInstalled = false;
+
+function isSameOriginApiRequest(input: RequestInfo | URL) {
+  const rawUrl = input instanceof Request ? input.url : input.toString();
+  const url = new URL(rawUrl, window.location.origin);
+  return url.origin === window.location.origin && url.pathname.startsWith("/api/") && url.pathname !== "/api/auth/logout";
+}
+
+/**
+ * Watches API responses in one place so every authenticated screen handles an
+ * expired or invalid session the same way.
+ */
+export function installSessionExpiryHandler() {
+  if (typeof window === "undefined" || redirectingForExpiredSession || sessionExpiryHandlerInstalled) return;
+
+  const browserFetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const response = await browserFetch(input, init);
+    if (response.status === 401 && isSameOriginApiRequest(input)) expireAuthSession();
+    return response;
+  };
+  sessionExpiryHandlerInstalled = true;
+}
+
+export function expireAuthSession() {
+  if (typeof window === "undefined" || redirectingForExpiredSession) return;
+
+  redirectingForExpiredSession = true;
+  window.localStorage.removeItem("auth_token");
+  // Keep this request alive while navigating away so the HttpOnly session
+  // cookie is cleared too.
+  void fetch("/api/auth/logout", { method: "POST", credentials: "same-origin", cache: "no-store", keepalive: true });
+  window.location.replace("/auth");
+}
+
 export function getAuthToken() {
   // "cookie" is a non-secret compatibility marker for older call sites that
   // still add an Authorization header. The real session is HttpOnly.
@@ -30,7 +66,7 @@ export async function fetchSessionUser(signal?: AbortSignal): Promise<SessionUse
   });
 
   if (response.status === 401) {
-    clearAuthSession();
+    expireAuthSession();
     return null;
   }
   if (!response.ok) throw new Error("Unable to restore session");

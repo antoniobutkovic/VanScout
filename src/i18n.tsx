@@ -524,6 +524,7 @@ const CROATIAN: Record<string, string> = {
   Other: "Ostalo",
   "Your funds": "Vaša sredstva",
   Balance: "Stanje",
+  "Current balance": "Trenutno stanje",
   "Add funds": "Dodaj sredstva",
   "Payment method": "Način plaćanja",
   "Visa ending in 2400": "Visa koja završava na 2400",
