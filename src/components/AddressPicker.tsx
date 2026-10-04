@@ -73,7 +73,18 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
 
       const nextMap = new maplibregl.Map({
         container: mapContainerRef.current,
-        style: "https://tiles.openfreemap.org/styles/liberty",
+        style: {
+          version: 8,
+          sources: {
+            geoapify: {
+              type: "raster",
+              tiles: ["/api/map-tiles/{z}/{x}/{y}"],
+              tileSize: 256,
+              attribution: "© <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors · <a href=\"https://www.geoapify.com/\" target=\"_blank\" rel=\"noreferrer\">Geoapify</a>",
+            },
+          },
+          layers: [{ id: "geoapify", type: "raster", source: "geoapify" }],
+        },
         center: [initialLongitude, initialLatitude],
         zoom: initialLocation ? 16 : 11,
       });
