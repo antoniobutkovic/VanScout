@@ -30,7 +30,6 @@ const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Review"
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TRANSPORT_PAGE_SIZE = 20;
 const ITEM_NAME_MAX_LENGTH = 200;
-const CARRIER_PICKUP_AREA_KEY = "vanscout-carrier-pickup-area";
 
 function Arrow() { return null; }
 function BackIcon() { return <svg className="back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>; }
@@ -1440,6 +1439,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
   const [pickupRadius, setPickupRadius] = useState(25);
   const [draftPickupArea, setDraftPickupArea] = useState<AddressLocation | null>(null);
   const [draftPickupRadius, setDraftPickupRadius] = useState(25);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [isPickupAreaOpen, setIsPickupAreaOpen] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -1460,13 +1460,28 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
       setHasMore(page.hasMore);
     }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoading(false));
   }, [loadPage, t]);
+  const persistSearchPreferences = useCallback((preferences: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number }) => {
+    if (!preferencesLoaded) return;
+    const token = getAuthToken();
+    if (!token) return;
+    void fetch("/api/carrier-search-preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(preferences),
+    });
+  }, [preferencesLoaded]);
   useEffect(() => {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(CARRIER_PICKUP_AREA_KEY) || "null") as AddressLocation | null;
-      if (saved && typeof saved.formatted === "string" && Number.isFinite(saved.latitude) && Number.isFinite(saved.longitude)) setPickupArea(saved);
-    } catch {
-      window.localStorage.removeItem(CARRIER_PICKUP_AREA_KEY);
-    }
+    const token = getAuthToken();
+    if (!token) { setPreferencesLoaded(true); return; }
+    void fetch("/api/carrier-search-preferences", { headers: { Authorization: `Bearer ${token}` } })
+      .then(async response => {
+        const payload = await response.json() as { preferences?: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number } | null };
+        if (!response.ok || !payload.preferences) return;
+        setDistanceFilter(payload.preferences.distanceKm);
+        setPickupArea(payload.preferences.pickupArea);
+        setPickupRadius(payload.preferences.pickupRadiusKm);
+      })
+      .finally(() => setPreferencesLoaded(true));
   }, []);
   useEffect(() => {
     if (!isPickupAreaOpen) return;
@@ -1474,10 +1489,10 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [isPickupAreaOpen]);
-  const updatePickupArea = (location: AddressLocation | null) => {
+  const updatePickupArea = (location: AddressLocation | null, radius: number) => {
     setPickupArea(location);
-    if (location) window.localStorage.setItem(CARRIER_PICKUP_AREA_KEY, JSON.stringify(location));
-    else window.localStorage.removeItem(CARRIER_PICKUP_AREA_KEY);
+    setPickupRadius(radius);
+    persistSearchPreferences({ distanceKm: distanceFilter, pickupArea: location, pickupRadiusKm: radius });
   };
   const openPickupAreaDialog = () => {
     setDraftPickupArea(pickupArea);
@@ -1485,16 +1500,18 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     setIsPickupAreaOpen(true);
   };
   const applyPickupArea = () => {
-    updatePickupArea(draftPickupArea);
-    setPickupRadius(draftPickupRadius);
+    updatePickupArea(draftPickupArea, draftPickupRadius);
     setIsPickupAreaOpen(false);
   };
   const clearPickupArea = () => {
-    updatePickupArea(null);
-    setPickupRadius(draftPickupRadius);
+    updatePickupArea(null, draftPickupRadius);
     setIsPickupAreaOpen(false);
   };
-  const maximumRouteDistance = useMemo(() => Math.max(250, Math.ceil(Math.max(...transports.map(request => request.distanceKm)) / 10) * 10), [transports]);
+  const updateDistanceFilter = (distance: number) => {
+    setDistanceFilter(distance);
+    persistSearchPreferences({ distanceKm: distance, pickupArea, pickupRadiusKm: pickupRadius });
+  };
+  const maximumRouteDistance = useMemo(() => Math.max(250, distanceFilter ?? 0, Math.ceil(Math.max(...transports.map(request => request.distanceKm)) / 10) * 10), [distanceFilter, transports]);
   const selectedDistance = distanceFilter ?? maximumRouteDistance;
   const hasDistanceFilter = selectedDistance < maximumRouteDistance;
   const hasActiveFilters = hasDistanceFilter || Boolean(pickupArea);
@@ -1516,7 +1533,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     <div className="workspace-title jobs-title">
       <h1>{t("Available transports")}</h1>
       <div className="job-header-filters">
-        <label className="job-filter-field job-distance-filter transport-length-filter"><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => setDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span></label>
+        <label className="job-filter-field job-distance-filter transport-length-filter"><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => updateDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span></label>
         <button type="button" className="pickup-area-trigger" onClick={openPickupAreaDialog} aria-expanded={isPickupAreaOpen} aria-label={t("Pickup area")}><b>{pickupAreaSummary}</b></button>
       </div>
     </div>

@@ -124,6 +124,18 @@ async function ensureSchema() {
         )
       `;
       await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_search_preferences (
+          carrier_id TEXT PRIMARY KEY REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          distance_km INTEGER CHECK (distance_km IS NULL OR distance_km >= 10),
+          pickup_formatted TEXT,
+          pickup_latitude DOUBLE PRECISION,
+          pickup_longitude DOUBLE PRECISION,
+          pickup_city TEXT,
+          pickup_radius_km INTEGER NOT NULL DEFAULT 25 CHECK (pickup_radius_km BETWEEN 5 AND 500),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`
         CREATE TABLE IF NOT EXISTS vanscout_carrier_profile_images (
           id TEXT PRIMARY KEY,
           carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
