@@ -409,8 +409,6 @@ function toVehicle(row: Record<string, unknown>): CarrierVehicle {
     id: String(row.id),
     name: String(row.name),
     sizeDescription: String(row.size_description),
-    completedTransports: Number(row.completed_transports),
-    kilometresTravelled: Number(row.kilometres_travelled),
   };
 }
 
@@ -435,6 +433,16 @@ export async function getPublicCarrierProfile(carrierId: string): Promise<Carrie
        FROM vanscout_transport_offers offer
        JOIN vanscout_transport_requests tr ON tr.id = offer.transport_request_id
        WHERE offer.carrier_id = carrier.id AND offer.status = 'confirmed' AND tr.status = 'completed') AS completed_transports,
+      COALESCE((SELECT ROUND(SUM(
+        6371 * 2 * ASIN(SQRT(
+          POWER(SIN(RADIANS((tr.delivery_latitude - tr.pickup_latitude) / 2)), 2)
+          + COS(RADIANS(tr.pickup_latitude)) * COS(RADIANS(tr.delivery_latitude))
+          * POWER(SIN(RADIANS((tr.delivery_longitude - tr.pickup_longitude) / 2)), 2)
+        ))
+      ))::int
+       FROM vanscout_transport_offers offer
+       JOIN vanscout_transport_requests tr ON tr.id = offer.transport_request_id
+       WHERE offer.carrier_id = carrier.id AND offer.status = 'confirmed' AND tr.status = 'completed'), 0) AS kilometres_travelled,
       (SELECT ROUND(AVG(review.rating)::numeric, 1) FROM vanscout_carrier_reviews review WHERE review.carrier_id = carrier.id) AS rating_average,
       (SELECT COUNT(*)::int FROM vanscout_carrier_reviews review WHERE review.carrier_id = carrier.id) AS rating_count
     FROM vanscout_users carrier
@@ -444,7 +452,7 @@ export async function getPublicCarrierProfile(carrierId: string): Promise<Carrie
   if (!rows[0]) return null;
   const row = rows[0] as Record<string, unknown>;
   const [vehicles, reviews] = await Promise.all([
-    sql`SELECT id, name, size_description, completed_transports, kilometres_travelled FROM vanscout_carrier_vehicles WHERE carrier_id = ${carrierId} ORDER BY created_at ASC`,
+    sql`SELECT id, name, size_description FROM vanscout_carrier_vehicles WHERE carrier_id = ${carrierId} ORDER BY created_at ASC`,
     sql`
       SELECT review.id, review.rating, review.feedback, reviewer.first_name AS customer_name, review.created_at
       FROM vanscout_carrier_reviews review
@@ -460,6 +468,7 @@ export async function getPublicCarrierProfile(carrierId: string): Promise<Carrie
     companyName: typeof row.company_name === "string" ? row.company_name : "",
     bio: typeof row.bio === "string" ? row.bio : "",
     completedTransports: Number(row.completed_transports ?? 0),
+    kilometresTravelled: Number(row.kilometres_travelled ?? 0),
     profileImageId: typeof row.profile_image_id === "string" ? row.profile_image_id : null,
     imageIds: Array.isArray(row.image_ids) ? row.image_ids.map(String) : [],
     ratingAverage: row.rating_average === null || row.rating_average === undefined ? null : Number(row.rating_average),
@@ -479,9 +488,9 @@ export async function addCarrierVehicle(carrierId: string, input: Omit<CarrierVe
   await ensureDatabaseSchema();
   const sql = sqlClient();
   const rows = await sql`
-    INSERT INTO vanscout_carrier_vehicles (id, carrier_id, name, size_description, completed_transports, kilometres_travelled)
-    VALUES (${randomUUID()}, ${carrierId}, ${input.name}, ${input.sizeDescription}, ${input.completedTransports}, ${input.kilometresTravelled})
-    RETURNING id, name, size_description, completed_transports, kilometres_travelled
+    INSERT INTO vanscout_carrier_vehicles (id, carrier_id, name, size_description)
+    VALUES (${randomUUID()}, ${carrierId}, ${input.name}, ${input.sizeDescription})
+    RETURNING id, name, size_description
   `;
   return toVehicle(rows[0] as Record<string, unknown>);
 }
@@ -491,10 +500,9 @@ export async function updateCarrierVehicle(carrierId: string, vehicleId: string,
   const sql = sqlClient();
   const rows = await sql`
     UPDATE vanscout_carrier_vehicles
-    SET name = ${input.name}, size_description = ${input.sizeDescription}, completed_transports = ${input.completedTransports},
-      kilometres_travelled = ${input.kilometresTravelled}, updated_at = NOW()
+    SET name = ${input.name}, size_description = ${input.sizeDescription}, updated_at = NOW()
     WHERE id = ${vehicleId} AND carrier_id = ${carrierId}
-    RETURNING id, name, size_description, completed_transports, kilometres_travelled
+    RETURNING id, name, size_description
   `;
   return rows[0] ? toVehicle(rows[0] as Record<string, unknown>) : null;
 }

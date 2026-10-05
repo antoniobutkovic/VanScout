@@ -33,6 +33,7 @@ export type CarrierProfile = {
   companyName: string;
   bio: string;
   completedTransports: number;
+  kilometresTravelled: number;
   profileImageId: string | null;
   imageIds: string[];
   ratingAverage: number | null;
@@ -45,8 +46,6 @@ export type CarrierVehicle = {
   id: string;
   name: string;
   sizeDescription: string;
-  completedTransports: number;
-  kilometresTravelled: number;
 };
 
 export type CarrierReview = {
