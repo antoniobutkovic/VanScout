@@ -18,7 +18,7 @@
 }
 
 * { box-sizing: border-box; }
-html { background: var(--paper); }
+html { background: var(--paper); scrollbar-gutter: stable; }
 body { margin: 0; min-width: 320px; background: var(--paper); color: var(--ink); }
 button, input, select, textarea { font: inherit; }
 button { color: inherit; cursor: pointer; }
@@ -502,18 +502,24 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .conversation small, .conversation i { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; font-style: normal; }
 .conversation b { font-size: 13px; }
 .messages > article { display: grid; grid-template-rows: auto auto 1fr auto; min-width: 0; }
-.messages > article > header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--stone); }
-.messages > article > header > div { display: flex; align-items: center; gap: 11px; }
+.messages > article > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--stone); }
+.messages > article > header > div { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 11px; }
+.messages > article > header .avatar { flex: 0 0 43px; aspect-ratio: 1; }
 .messages > article > header > div > span:not(.avatar) { display: grid; gap: 3px; }
+.conversation-heading { min-width: 0; }
+.conversation-heading small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .messages > article small { color: var(--muted); font-size: 11px; }
-.offer-tag { background: var(--sage); padding: 5px 7px; font-size: 11px; }
+.offer-tag { flex: 0 0 140px; min-width: 140px; background: var(--sage); padding: 5px 7px; font-size: 11px; text-align: center; }
+.offer-tag .offer-price-breakdown { grid-template-rows: auto auto; white-space: nowrap; }
 .offer-tag .offer-price-breakdown strong { font-size: 12px; letter-spacing: 0; }
-.offer-tag .offer-price-breakdown small { font-size: 9px; }
+.offer-tag .offer-price-breakdown small { font-size: 9px; white-space: nowrap; }
 .chat-context { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: var(--mist); color: var(--muted); font-size: 12px; }
+.deal-context { flex-wrap: wrap; }
 .deal-context > span { display: grid; gap: 3px; }
 .deal-context > span b { color: var(--ink); font-size: 12px; }
 .deal-context > span small { color: var(--muted); }
-.deal-context.confirmed { background: var(--sage); }
+.deal-context.confirmed { flex-wrap: nowrap; gap: 20px; background: var(--sage); }
+.deal-context .deal-contact { flex: 0 1 auto; align-self: center; padding: 0; border-top: 0; border-bottom: 0; background: transparent; text-align: right; }
 .thread { overflow: auto; padding: 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 11px; }
 .google-maps-location-share { align-self: stretch; display: grid; grid-template-columns: 1fr auto; gap: 14px; padding: 16px; border: 1px solid color-mix(in srgb, var(--moss) 45%, var(--stone)); background: #f1f5ed; }
 .google-maps-location-share h2 { margin: 2px 0 5px; font-size: 17px; }
@@ -729,6 +735,32 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .carrier-profile section { border-top: 1px solid var(--stone); padding-top: 20px; margin-top: 30px; }
 .carrier-profile section > header { display: flex; justify-content: space-between; align-items: center; }
 .carrier-profile section > header h2 { margin: 0; }
+.transport-review { margin-top: 34px; padding: 28px; border: 1px solid var(--stone); background: var(--white); }
+.transport-review h2 { margin-bottom: 7px; font-size: 28px; }
+.transport-review > p { color: var(--muted); }
+.transport-review textarea { display: block; width: 100%; min-height: 105px; margin-top: 8px; padding: 12px; border: 1px solid var(--stone); resize: vertical; }
+.public-carrier-profile { overflow-y: auto; }
+.public-carrier-profile > p { margin: 22px 0; line-height: 1.55; }
+.public-carrier-profile section { display: grid; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--stone); }
+.public-carrier-profile .vehicle { font-size: 28px; }
+.public-carrier-profile blockquote { display: grid; gap: 7px; margin: 0; padding: 15px; background: var(--sage); }
+.public-carrier-profile blockquote > b { color: var(--clay); letter-spacing: .08em; }
+.public-carrier-profile blockquote > span { font-size: 14px; line-height: 1.5; }
+.public-carrier-profile blockquote footer { font-size: 11px; color: var(--muted); }
+.vehicle-manager { display: grid; gap: 13px; }
+.vehicle-manager > header { display: grid !important; justify-content: initial !important; gap: 4px; }
+.vehicle-manager > header span { color: var(--muted); font-size: 12px; font-weight: 400; }
+.vehicle-manager > article { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 12px; padding: 15px; background: var(--sage); }
+.vehicle-manager > article > div:first-child { font-size: 28px; }
+.vehicle-manager > article > div:nth-child(2) { display: grid; gap: 4px; }
+.vehicle-manager > article small { color: var(--muted); font-size: 11px; }
+.vehicle-manager > article button { font-size: 12px; }
+.vehicle-manager form { display: grid; gap: 13px; padding: 19px; background: var(--white); border: 1px solid var(--stone); }
+.vehicle-manager form h3 { margin: 0; font-size: 18px; }
+.vehicle-manager form label { display: grid; gap: 6px; font-size: 12px; font-weight: 800; }
+.vehicle-manager form input { min-height: 42px; padding: 9px 11px; border: 1px solid var(--stone); background: var(--paper); }
+.vehicle-manager form > div:last-child { display: flex; align-items: center; gap: 15px; }
+.vehicle-stat-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .vehicles > header { margin-top: 12px; }
 .vehicles .manager { margin-top: 25px; display: grid; grid-template-columns: auto 1fr auto; padding: 22px; }
 .vehicles .manager small { color: var(--muted); font-size: 11px; }
@@ -751,6 +783,9 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 }
 
 @media (max-width: 680px) {
+  .messages > article > header { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .messages > article > header > div { padding-right: 0; }
+  .messages > article > header .offer-tag { margin-left: 54px; }
   h1 { font-size: clamp(1.425rem, 7vw, 2rem); }
   .topbar { padding: 0 18px; grid-template-columns: 1fr auto; }
   .topbar nav { display: none; }

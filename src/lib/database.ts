@@ -95,10 +95,14 @@ async function ensureSchema() {
           preferred_date DATE,
           preferred_date_to DATE,
           status TEXT NOT NULL DEFAULT 'looking_for_carriers' CHECK (status IN ('looking_for_carriers', 'carrier_booked', 'completed')),
+          completed_at TIMESTAMPTZ,
+          review_invitation_sent_at TIMESTAMPTZ,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
+      await sql`ALTER TABLE vanscout_transport_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE vanscout_transport_requests ADD COLUMN IF NOT EXISTS review_invitation_sent_at TIMESTAMPTZ`;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_transport_requests_requester_created_idx ON vanscout_transport_requests (requester_id, created_at DESC)`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_request_draft_images (
@@ -123,6 +127,32 @@ async function ensureSchema() {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_vehicles (
+          id TEXT PRIMARY KEY,
+          carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          size_description TEXT NOT NULL,
+          completed_transports INTEGER NOT NULL DEFAULT 0 CHECK (completed_transports >= 0),
+          kilometres_travelled INTEGER NOT NULL DEFAULT 0 CHECK (kilometres_travelled >= 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_vehicles_carrier_idx ON vanscout_carrier_vehicles (carrier_id, created_at)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_reviews (
+          id TEXT PRIMARY KEY,
+          transport_request_id TEXT NOT NULL UNIQUE REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,
+          carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          requester_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+          feedback TEXT NOT NULL DEFAULT '' CHECK (LENGTH(feedback) <= 2000),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_reviews_carrier_created_idx ON vanscout_carrier_reviews (carrier_id, created_at DESC)`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_carrier_search_preferences (
           carrier_id TEXT PRIMARY KEY REFERENCES vanscout_users(id) ON DELETE CASCADE,

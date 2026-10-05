@@ -17,7 +17,7 @@ import { googleMapsDirectionsUrl } from "../lib/google-maps-directions";
 import { googleMapsUrl } from "../lib/google-maps-sharing";
 import type { AddressLocation } from "../lib/location";
 import type { TransportRequest, TransportStatus } from "../lib/transport-types";
-import type { CarrierProfile as CarrierProfileData, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
+import type { CarrierProfile as CarrierProfileData, CarrierVehicle, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
 
 type Offer = { name: string; price: string; rating: string; jobs: string; vehicle: string; time: string; note: string; initials: string; tone: string };
 type AuthRole = "requester" | "transporter";
@@ -425,6 +425,10 @@ function PrivateImage({ src, alt, className }: { src: string; alt: string; class
   }, [src]);
   return objectUrl ? <img className={className} src={objectUrl} alt={alt} /> : <span className={className} aria-label={alt} />;
 }
+function ConversationAvatar({ conversation }: { conversation: Conversation }) {
+  const initials = conversation.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
+  return <span className="avatar">{conversation.otherPartyProfileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${conversation.otherPartyProfileImageId}`} alt={conversation.otherPartyName} /> : conversation.otherPartyAvatarUrl ? <img className="profile-photo" src={conversation.otherPartyAvatarUrl} alt={conversation.otherPartyName} /> : initials}</span>;
+}
 function FilePreview({ file, className, alt = "" }: { file: File; className?: string; alt?: string }) {
   const [src, setSrc] = useState("");
   useEffect(() => { const url = URL.createObjectURL(file); setSrc(url); return () => URL.revokeObjectURL(url); }, [file]);
@@ -655,6 +659,8 @@ export function Registration() {
   type AuthStage = "login" | "role" | "profile" | "email-code" | "phone" | "phone-code";
   const requestedMode = searchParams.get("mode");
   const verificationEmail = searchParams.get("verifyEmail") || "";
+  const requestedNext = searchParams.get("next") || "";
+  const safeNext = requestedNext.startsWith("/customer") ? requestedNext : "";
   const [stage, setStage] = useState<AuthStage>(verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login");
   const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester");
   const [firstName, setFirstName] = useState("");
@@ -694,7 +700,7 @@ export function Registration() {
 
   const syncPhotosAndNavigate = async (token: string, user: AuthenticatedUser) => {
     await syncPendingRequestImages(token).catch(() => false);
-    nav(user.role === "transporter" ? "/carrier" : "/customer");
+    nav(user.role === "transporter" ? "/carrier" : safeNext || "/customer");
   };
 
   const validatePasswords = () => {
@@ -1131,7 +1137,8 @@ export function CustomerWorkspace() {
   const loc = useLocation();
   const nav = useNavigate();
   const [view, setView] = useState(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests");
-  const [filter, setFilter] = useState<"active" | "completed">("active");
+  const reviewTransportId = loc.pathname.match(/^\/customer\/review\/([^/]+)$/)?.[1] || "";
+  const [filter, setFilter] = useState<"active" | "completed">(reviewTransportId ? "completed" : "active");
   const [transports, setTransports] = useState<TransportRequest[]>([]);
   const [selectedTransport, setSelectedTransport] = useState<TransportRequest | null>(null);
   const [loadingTransports, setLoadingTransports] = useState(true);
@@ -1141,6 +1148,7 @@ export function CustomerWorkspace() {
   useEffect(() => {
     setView(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests");
     setSelectedTransport(null);
+    if (loc.pathname.includes("/review/")) setFilter("completed");
   }, [loc.pathname]);
 
   useEffect(() => {
@@ -1163,14 +1171,16 @@ export function CustomerWorkspace() {
           return;
         }
         if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
-        setTransports(payload.transports || []);
+        const loaded = payload.transports || [];
+        setTransports(loaded);
+        if (reviewTransportId) setSelectedTransport(loaded.find(transport => transport.id === reviewTransportId) || null);
       })
       .catch(error => {
         if (!(error instanceof DOMException && error.name === "AbortError")) setTransportError(error instanceof Error ? error.message : t("Unable to load transports"));
       })
       .finally(() => { if (!controller.signal.aborted) setLoadingTransports(false); });
     return () => controller.abort();
-  }, [filter, nav, t]);
+  }, [filter, nav, reviewTransportId, t]);
 
   return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title"><div><h1>{t("Your transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => setSelectedTransport(request)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onBack={() => setSelectedTransport(null)} onOpenMessages={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
 }
@@ -1180,7 +1190,9 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
   const [offers, setOffers] = useState<TransportOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [profileCarrierId, setProfileCarrierId] = useState("");
   const hasOffers = !loading && offers.length > 0;
+  const confirmedOffer = offers.find(offer => offer.status === "confirmed");
   const loadOffers = async () => {
     const token = getAuthToken();
     if (!token) return;
@@ -1207,12 +1219,67 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
           <div className="offer-time"><b>{formatTransportDates(offer.availableDate, null, language)}</b><span>{t("Available date")}</span></div>
           {offer.message && <p>“{offer.message}”</p>}
           <div className="price"><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} /></div>
-          <div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="button dark short" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div>
+          <div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="quiet-link" type="button" onClick={() => setProfileCarrierId(offer.carrierId)}>{t("View profile")}</button><button className="button dark short" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div>
         </article>)}</div>
       </aside>}
     </div>
+    {request.status === "completed" && confirmedOffer && <ReviewTransport request={request} offer={confirmedOffer} />}
+    {profileCarrierId && <PublicCarrierProfile carrierId={profileCarrierId} onClose={() => setProfileCarrierId("")} />}
     {error && <p className="transport-list-message error" role="alert">{error}</p>}
   </section>;
+}
+
+function ReviewTransport({ request, offer }: { request: TransportRequest; offer: TransportOffer }) {
+  const { t } = useLanguage();
+  const [rating, setRating] = useState(5);
+  const [feedback, setFeedback] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [submitted, setSubmitted] = useState(Boolean(request.hasReview));
+  const [error, setError] = useState("");
+  const submit = async () => {
+    const token = getAuthToken();
+    if (!token) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch(`/api/transports/${request.id}/review`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ rating, feedback }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to save review"));
+      setSubmitted(true);
+    } catch (reviewError) { setError(reviewError instanceof Error ? reviewError.message : t("Unable to save review")); }
+    finally { setSaving(false); }
+  };
+  return <section className="review transport-review">
+    <p className="eyebrow">{t("Transport complete")}</p>
+    <h2>{submitted ? t("Thank you for your review") : t("How did it go?")}</h2>
+    <p>{offer.companyName || offer.carrierName} · {request.itemName}</p>
+    {!submitted && <><div className="stars" aria-label={t("Rating")}>{[1, 2, 3, 4, 5].map(star => <button type="button" className={star <= rating ? "on" : ""} aria-label={`${star} ${t("stars")}`} aria-pressed={star === rating} onClick={() => setRating(star)} key={star}>★</button>)}</div>
+      <label>{t("Feedback (optional)")}<textarea value={feedback} onChange={event => setFeedback(event.target.value)} maxLength={2000} placeholder={t("Tell other customers about your experience")} /></label>
+      {error && <p className="transport-list-message error">{error}</p>}
+      <button type="button" className="button moss" disabled={saving} onClick={() => void submit()}>{saving ? t("Saving…") : t("Submit review")}</button>
+    </>}
+  </section>;
+}
+
+function PublicCarrierProfile({ carrierId, onClose }: { carrierId: string; onClose: () => void }) {
+  const { language, t } = useLanguage();
+  const [profile, setProfile] = useState<CarrierProfileData | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const token = getAuthToken();
+    void fetch(`/api/carriers/${carrierId}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined }).then(async response => {
+      const payload = await response.json() as { profile?: CarrierProfileData; error?: string };
+      if (!response.ok || !payload.profile) throw new Error(payload.error || t("Unable to load profile"));
+      setProfile(payload.profile);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load profile")));
+  }, [carrierId, t]);
+  return <div className="overlay"><aside className="side public-carrier-profile" aria-label={t("Carrier profile")}><button className="close" type="button" onClick={onClose}>×</button>
+    {error ? <p className="transport-list-message error">{error}</p> : !profile ? <p className="transport-list-message">{t("Loading profile…")}</p> : <>
+      <div className="profile-head"><span className="avatar large">{profile.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : profile.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><div><p className="eyebrow">{t("Carrier profile")}</p><h2>{profile.companyName || profile.carrierName}</h2><p>{profile.ratingAverage === null ? t("No ratings yet") : `★ ${profile.ratingAverage.toFixed(1)} · ${profile.ratingCount} ${t("ratings")}`} · {profile.completedTransports} {t("completed transports")}</p></div></div>
+      {profile.bio && <p>{profile.bio}</p>}
+      <section><h3>{t("Vehicles")}</h3>{profile.vehicles.length ? profile.vehicles.map(vehicle => <div className="vehicle" key={vehicle.id}>▰ <div><b>{vehicle.name}</b><span>{vehicle.sizeDescription} · {vehicle.completedTransports} {t("transports")} · {new Intl.NumberFormat(language === "hr" ? "hr-HR" : "en-GB").format(vehicle.kilometresTravelled)} km</span></div></div>) : <p>{t("No vehicles added yet")}</p>}</section>
+      <section><h3>{t("Customer reviews")}</h3>{profile.reviews.length ? profile.reviews.map(review => <blockquote key={review.id}><b>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</b>{review.feedback && <span>“{review.feedback}”</span>}<footer>— {review.customerName}, {new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { month: "short", year: "numeric" }).format(new Date(review.createdAt))}</footer></blockquote>) : <p>{t("No customer reviews yet")}</p>}</section>
+    </>}
+  </aside></div>;
 }
 function OfferCard({ offer, onProfile, onMessage, onAccept }: { offer: Offer; onProfile: () => void; onMessage: () => void; onAccept: () => void }) { const { t } = useLanguage(); return <article className="offer"><button onClick={onProfile}><Avatar offer={offer} /></button><div className="offer-person"><button onClick={onProfile}>{offer.name}</button><span>★ {offer.rating} · {t(offer.jobs)}</span><small>{offer.vehicle}</small></div><div className="offer-time"><b>{t(offer.time)}</b><span>{t("Available window")}</span></div><p>“{t(offer.note)}”</p><div className="price"><b>{offer.price}</b><span>{t("all in")}</span></div><div className="offer-actions"><button onClick={onMessage}>{t("Message")}</button><button onClick={onProfile}>{t("View profile")}</button><button className="button moss short" onClick={onAccept}>{t("Accept")}</button></div></article>; }
 function OfferDialog({ offer, onClose, onAccept, onMessage }: { offer: Offer; onClose: () => void; onAccept: () => void; onMessage: () => void }) { const { t } = useLanguage(); const [profile, setProfile] = useState(true); return <div className="overlay">{profile ? <aside className="side"><button className="close" onClick={onClose}>×</button><div className="profile-head"><Avatar offer={offer} large /><div><p className="eyebrow">{t("Verified carrier")}</p><h2>{offer.name}</h2><p>★ {offer.rating} · {t(offer.jobs)} {t("completed")}</p></div></div><p>{t("I move furniture and store purchases around Zagreb with a clean, fully-equipped large van. Clear communication, careful handling.")}</p><section><h3>{t("Vehicle")}</h3><div className="vehicle">▰ <div><b>{offer.vehicle}</b><span>{t("Large van")} · 3.2m {t("cargo length")}</span></div></div></section><section><h3>{t("Previous work")}</h3><div className="work-shots"><span /><span /><span /></div></section><blockquote>{t("On time, careful with everything, and a genuinely nice person.")}<footer>— Ana, {t("verified customer")}</footer></blockquote><footer className="side-actions"><button className="button ghost" onClick={onMessage}>{t("Message")}</button><button className="button moss" onClick={() => setProfile(false)}>{t("Accept")} {offer.price}</button></footer></aside> : <div className="confirm"><button className="close" onClick={onClose}>×</button><p className="eyebrow">{t("Confirm carrier")}</p><h2>{t("Choose {name} for this transport?", { name: offer.name })}</h2><div><b>{offer.price}</b><span>IKEA Zagreb → Trešnjevka</span><span>{t(offer.time)}</span></div><p>{t("After accepting, you and the carrier will be able to see each other’s contact information.")}</p><footer><button className="button ghost" onClick={() => setProfile(true)}>{t("Cancel")}</button><button className="button moss" onClick={onAccept}>{t("Accept offer")}</button></footer></div>}</div>; }
@@ -1437,11 +1504,11 @@ function LiveMessages() {
     <header><h1>{t("Messages")}</h1></header>
     {error && <p className="transport-list-message error">{error}</p>}
     {!conversations.length ? <div className="empty-transports"><h2>{t("No conversations yet")}</h2><p>{t("A conversation opens as soon as a carrier sends an offer.")}</p></div> : <div className="messages">
-      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => setSelectedId(conversation.offerId)} key={conversation.offerId}><span className="avatar">{conversation.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span></button>)}</aside>
+      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => setSelectedId(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span></button>)}</aside>
       {selected && <article>
-        <header><div><span className="avatar">{selected.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><span><b>{selected.otherPartyName}</b><small>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
-        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}</div>
-        <div className="thread">{selected.status === "confirmed" && selected.role === "transporter" && <GoogleMapsLocationShare onSend={sendGoogleMapsTrackingLink} />}{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}><MessageBody body={selected.offerMessage} /></p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}><MessageBody body={message.body} /></p>)}{selected.status === "confirmed" && selected.role === "requester" && messages.some(message => message.senderId !== userId && googleMapsUrl(message.body)) && <p className="tracking-link-received">{t("Your transporter shared a Google Maps location link. Open it in the message above to follow the journey.")}</p>}{selected.status === "confirmed" && <div className="contact-note contact-revealed"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
+        <header><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
+        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <div className="contact-note contact-revealed deal-contact"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
+        <div className="thread">{selected.status === "confirmed" && selected.role === "transporter" && <GoogleMapsLocationShare onSend={sendGoogleMapsTrackingLink} />}{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}><MessageBody body={selected.offerMessage} /></p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}><MessageBody body={message.body} /></p>)}{selected.status === "confirmed" && selected.role === "requester" && messages.some(message => message.senderId !== userId && googleMapsUrl(message.body)) && <p className="tracking-link-received">{t("Your transporter shared a Google Maps location link. Open it in the message above to follow the journey.")}</p>}</div>
         {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form>}
       </article>}
     </div>}
@@ -1763,11 +1830,43 @@ function CarrierProfileEditor() {
     setMessage(t("Profile saved"));
   };
   const initials = profile?.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="carrier-profile real-carrier-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.carrierName || t("Your profile")}</h1><p>{profile?.completedTransports || 0} {t("completed transports")}</p></div></div><form noValidate onSubmit={save}><label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /><span className="field-hint">{t("This name appears on your offers and in customer chats.")}</span></label><label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /><span className="field-hint">{t("A short, specific introduction helps customers choose with confidence.")}</span></label><div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div>{remainingImageSlots > 0 && <label className="business-image-picker"><input type="file" accept="image/*" multiple onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span>＋ {t("Add image")}</span></label>}</div>{imageCount > 0 && <div className="carrier-image-grid">{imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); setMessage(""); }}>×</button></figure>)}{files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); setMessage(""); }}>×</button></figure>)}</div>}{error && <p className="transport-list-message error">{error}</p>}{message && <p className="auth-message success">{message}</p>}<button className="button moss" type="submit">{t("Save profile")}</button></form><PrivacyControls /></section>;
+  return <section className="carrier-profile real-carrier-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.carrierName || t("Your profile")}</h1><p>{profile?.completedTransports || 0} {t("completed transports")}</p></div></div><form noValidate onSubmit={save}><label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /><span className="field-hint">{t("This name appears on your offers and in customer chats.")}</span></label><label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /><span className="field-hint">{t("A short, specific introduction helps customers choose with confidence.")}</span></label><div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div>{remainingImageSlots > 0 && <label className="business-image-picker"><input type="file" accept="image/*" multiple onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span>＋ {t("Add image")}</span></label>}</div>{imageCount > 0 && <div className="carrier-image-grid">{imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); setMessage(""); }}>×</button></figure>)}{files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); setMessage(""); }}>×</button></figure>)}</div>}{error && <p className="transport-list-message error">{error}</p>}{message && <p className="auth-message success">{message}</p>}<button className="button moss" type="submit">{t("Save profile")}</button></form><VehicleManager vehicles={profile?.vehicles || []} onChange={vehicles => setProfile(current => current ? { ...current, vehicles } : current)} /><PrivacyControls /></section>;
+}
+
+function VehicleManager({ vehicles, onChange }: { vehicles: CarrierVehicle[]; onChange: (vehicles: CarrierVehicle[]) => void }) {
+  const { t } = useLanguage();
+  const empty = { name: "", sizeDescription: "", completedTransports: 0, kilometresTravelled: 0 };
+  const [draft, setDraft] = useState<Omit<CarrierVehicle, "id">>(empty);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const edit = (vehicle: CarrierVehicle) => { const { id, ...next } = vehicle; setEditingId(id); setDraft(next); setError(""); };
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const token = getAuthToken(); if (!token) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/carrier-profile/vehicles", { method: editingId ? "PUT" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(editingId ? { id: editingId, ...draft } : draft) });
+      const payload = await response.json() as { vehicle?: CarrierVehicle; error?: string };
+      if (!response.ok || !payload.vehicle) throw new Error(payload.error || t("Unable to save vehicle"));
+      onChange(editingId ? vehicles.map(vehicle => vehicle.id === editingId ? payload.vehicle! : vehicle) : [...vehicles, payload.vehicle]);
+      setDraft(empty); setEditingId(null);
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : t("Unable to save vehicle")); }
+    finally { setSaving(false); }
+  };
+  const remove = async (id: string) => {
+    const token = getAuthToken(); if (!token || !window.confirm(t("Remove this vehicle?"))) return;
+    const response = await fetch(`/api/carrier-profile/vehicles?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    if (response.ok) { onChange(vehicles.filter(vehicle => vehicle.id !== id)); if (editingId === id) { setEditingId(null); setDraft(empty); } }
+    else setError(t("Unable to remove vehicle"));
+  };
+  return <section className="vehicle-manager"><header><h2>{t("Vehicles")}</h2><span>{t("Add the vehicle data customers see on your profile")}</span></header>
+    {vehicles.map(vehicle => <article key={vehicle.id}><div>▰</div><div><b>{vehicle.name}</b><small>{vehicle.sizeDescription} · {vehicle.completedTransports} {t("completed transports")} · {new Intl.NumberFormat().format(vehicle.kilometresTravelled)} km</small></div><button type="button" className="quiet-link" onClick={() => edit(vehicle)}>{t("Edit")}</button><button type="button" className="quiet-link danger" onClick={() => void remove(vehicle.id)}>{t("Remove")}</button></article>)}
+    <form onSubmit={save}><h3>{editingId ? t("Edit vehicle") : t("Add vehicle")}</h3><label>{t("Vehicle name")}<input value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} maxLength={120} required placeholder={t("e.g. Renault Master")} /></label><label>{t("Size and capacity")}<input value={draft.sizeDescription} onChange={event => setDraft(current => ({ ...current, sizeDescription: event.target.value }))} maxLength={250} required placeholder={t("e.g. Large van · 3.2m cargo length · 1,350kg payload")} /></label><div className="vehicle-stat-fields"><label>{t("Completed transports")}<input type="number" min="0" value={draft.completedTransports} onChange={event => setDraft(current => ({ ...current, completedTransports: Math.max(0, Number(event.target.value) || 0) }))} /></label><label>{t("Kilometres travelled")}<input type="number" min="0" value={draft.kilometresTravelled} onChange={event => setDraft(current => ({ ...current, kilometresTravelled: Math.max(0, Number(event.target.value) || 0) }))} /></label></div>{error && <p className="transport-list-message error">{error}</p>}<div><button className="button moss short" disabled={saving}>{saving ? t("Saving…") : t("Save vehicle")}</button>{editingId && <button type="button" className="quiet-link" onClick={() => { setEditingId(null); setDraft(empty); }}>{t("Cancel")}</button>}</div></form>
+  </section>;
 }
 function JobDetail({ onBack, onOffer }: { onBack: () => void; onOffer: () => void }) { const { t } = useLanguage(); return <section className="job-detail"><button className="back" onClick={onBack}>← {t("Available transports")}</button><header><div><p className="eyebrow">{t("Furniture")} · {t("Flexible")}</p><h1>{t("Bed slats")}</h1><p>IKEA Zagreb <i>→</i> Trešnjevka</p></div><b>12 km</b></header><div className="job-layout"><div><div className="detail-map"><RouteLine /><span>IKEA Zagreb</span><span>Trešnjevka</span></div><section><h2>{t("What you’re moving")}</h2><p>{t("Bed slats, already packed. No loading help required.")}</p><div className="photo-row"><ItemImage type="photo" /><ItemImage type="photo" /></div></section><section className="info-split"><div><span>{t("Pickup")}</span><b>{t("Flexible · Ground floor")}</b></div><div><span>{t("Delivery")}</span><b>{t("Trešnjevka · Elevator available")}</b></div></section></div><aside><p className="eyebrow">{t("Interested")}</p><h2>{t("Make a clear offer.")}</h2><p>{t("Tell the customer your price and when you can do it.")}</p><button className="button moss full" onClick={onOffer}>{t("Make an offer")} <Arrow /></button></aside></div><button className="button moss mobile-sticky" onClick={onOffer}>{t("Make an offer")}</button></section>; }
 function MakeOffer({ onBack, onSend }: { onBack: () => void; onSend: () => void }) { const { t } = useLanguage(); return <section className="make-offer"><button className="back" onClick={onBack}>← {t("Job details")}</button><p className="eyebrow">{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p><h1>{t("Your offer")}</h1><div><label className="price-input">€<input defaultValue="32" /></label><Picker label={t("Pickup availability")} defaultValue="today" options={[{ value: "today", label: <>{t("Today")}, 17:00–19:00</> }, { value: "tomorrow", label: t("Tomorrow, 10:00–12:00") }]} ariaLabel={t("Pickup availability")} /><Picker label={t("Delivery estimate")} defaultValue="45" options={[{ value: "45", label: t("Within 45 minutes of pickup") }, { value: "60", label: t("Within 1 hour of pickup") }]} ariaLabel={t("Delivery estimate")} /><Picker label={t("Vehicle")} defaultValue="master" options={[{ value: "master", label: <>Renault Master · {t("Large van")}</> }]} ariaLabel={t("Vehicle")} /><label>{t("Message")} <em>{t("Optional")}</em><textarea defaultValue={t("I’m already driving through this area tomorrow afternoon.")} /></label><button className="button moss full" onClick={onSend}>{t("Send offer")} <Arrow /></button></div></section>; }
-function MyOffers({ onOpen }: { onOpen: () => void }) { const { t } = useLanguage(); return <section className="my-offers"><div className="workspace-title"><div><p className="eyebrow">{t("Keep an eye on it")}</p><h1>{t("My offers")}</h1></div><div className="tabs"><button className="selected">{t("Pending")}</button><button>{t("Accepted")}</button><button>{t("Past")}</button></div></div><article><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb → Trešnjevka</p></div><strong>€32</strong><span className="status">{t("Waiting for customer")}</span><button className="button dark short" onClick={onOpen}>{t("Open")}</button></article></section>; }
+function MyOffers({ onOpen }: { onOpen: () => void }) { const { t } = useLanguage(); return <section className="my-offers"><div className="workspace-title"><div><p className="eyebrow">{t("Keep an eye on it")}</p><h1>{t("My offers")}</h1></div><div className="tabs"><button className="selected">{t("Pending")}</button><button>{t("Accepted")}</button><button>{t("Past")}</button></div></div><article><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb → Trešnjevka</p></div><strong>€32</strong><span className="status">{t("You are ready — waiting for the customer")}</span><button className="button dark short" onClick={onOpen}>{t("Open")}</button></article></section>; }
 function ActiveDelivery({ stage, onNext, share, onShare }: { stage: number; onNext: () => void; share: boolean; onShare: () => void }) { const { t } = useLanguage(); const title = ["Heading to pickup", "At pickup", "Item collected", "On the way"][stage]; const action = ["I’ve arrived", "Item collected", "Start delivery", "Mark as delivered"][stage]; return <section className="active-delivery"><p className="eyebrow">{t("Active transport")}</p><h1>{t(title)}</h1><div className="active-meta"><div><span>{t("Customer")}</span><b>Ana Novak</b><a href="tel:+385915552400">+385 91 555 2400</a></div><div><span>{t("Route")}</span><b>IKEA Zagreb → Trešnjevka</b><button>{t("Open navigation")}</button></div></div><div className="active-map"><RouteLine /><i>●</i></div><div className="share"><div><b>{t("Share live location with customer")}</b><p>{t("Your customer will receive a private tracking link until delivery is completed.")}</p></div><button className={share ? "switch on" : "switch"} onClick={onShare}><span /></button></div><div className="update-buttons">{["Traffic", "Pickup delay", "Customer unavailable", "Other"].map(x => <button key={x}>{t(x)}</button>)}</div><button className="button moss delivery-action" onClick={onNext}>{t(action)}</button></section>; }
 function Wallet() {
   const { language, t } = useLanguage();

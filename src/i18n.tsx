@@ -507,7 +507,6 @@ const CROATIAN: Record<string, string> = {
   Pending: "Na čekanju",
   Accepted: "Prihvaćene",
   Past: "Prošle",
-  "Waiting for customer": "Čeka se korisnik",
   Open: "Otvori",
   "Active transport": "Aktivni prijevoz",
   "Heading to pickup": "Na putu prema preuzimanju",

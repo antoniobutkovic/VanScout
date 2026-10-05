@@ -4,6 +4,9 @@ import { dateOnly, toTransportRequest } from "./transports";
 import type { CarrierProfile, ChatMessage, Conversation, MarketplaceTransport, OfferStatus, TransportOffer } from "./marketplace-types";
 import { decryptMessage, encryptMessage } from "./message-crypto";
 import type { TransportStatus } from "./transport-types";
+import { sendTransportReviewEmail } from "./mailer";
+import { optionalEnv } from "./config";
+import type { CarrierReview, CarrierVehicle } from "./marketplace-types";
 
 function iso(value: unknown) {
   const parsed = value instanceof Date ? value : new Date(String(value));
@@ -401,30 +404,155 @@ export async function listTransportDealTargets(transportId: string) {
   return rows.map(row => ({ offerId: String(row.offer_id), carrierId: String(row.carrier_id) }));
 }
 
-export async function getCarrierProfile(carrier: AppUser): Promise<CarrierProfile> {
+function toVehicle(row: Record<string, unknown>): CarrierVehicle {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    sizeDescription: String(row.size_description),
+    completedTransports: Number(row.completed_transports),
+    kilometresTravelled: Number(row.kilometres_travelled),
+  };
+}
+
+function toReview(row: Record<string, unknown>): CarrierReview {
+  return {
+    id: String(row.id),
+    rating: Number(row.rating),
+    feedback: String(row.feedback || ""),
+    customerName: String(row.customer_name),
+    createdAt: iso(row.created_at),
+  };
+}
+
+export async function getPublicCarrierProfile(carrierId: string): Promise<CarrierProfile | null> {
   await ensureDatabaseSchema();
   const sql = sqlClient();
   const rows = await sql`
-    SELECT profile.company_name, profile.bio,
-      (SELECT photo.id FROM vanscout_carrier_profile_photos photo WHERE photo.carrier_id = ${carrier.id}) AS profile_image_id,
-      COALESCE((SELECT ARRAY_AGG(image.id ORDER BY image.position) FROM vanscout_carrier_profile_images image WHERE image.carrier_id = ${carrier.id}), ARRAY[]::text[]) AS image_ids,
+    SELECT carrier.id AS carrier_id, carrier.name AS carrier_name, profile.company_name, profile.bio,
+      (SELECT photo.id FROM vanscout_carrier_profile_photos photo WHERE photo.carrier_id = carrier.id) AS profile_image_id,
+      COALESCE((SELECT ARRAY_AGG(image.id ORDER BY image.position) FROM vanscout_carrier_profile_images image WHERE image.carrier_id = carrier.id), ARRAY[]::text[]) AS image_ids,
       (SELECT COUNT(*)::int
        FROM vanscout_transport_offers offer
        JOIN vanscout_transport_requests tr ON tr.id = offer.transport_request_id
-       WHERE offer.carrier_id = ${carrier.id} AND offer.status = 'confirmed' AND tr.status = 'completed') AS completed_transports
-    FROM (SELECT 1) seed
-    LEFT JOIN vanscout_carrier_profiles profile ON profile.carrier_id = ${carrier.id}
+       WHERE offer.carrier_id = carrier.id AND offer.status = 'confirmed' AND tr.status = 'completed') AS completed_transports,
+      (SELECT ROUND(AVG(review.rating)::numeric, 1) FROM vanscout_carrier_reviews review WHERE review.carrier_id = carrier.id) AS rating_average,
+      (SELECT COUNT(*)::int FROM vanscout_carrier_reviews review WHERE review.carrier_id = carrier.id) AS rating_count
+    FROM vanscout_users carrier
+    LEFT JOIN vanscout_carrier_profiles profile ON profile.carrier_id = carrier.id
+    WHERE carrier.id = ${carrierId} AND carrier.role = 'transporter'
   `;
+  if (!rows[0]) return null;
   const row = rows[0] as Record<string, unknown>;
+  const [vehicles, reviews] = await Promise.all([
+    sql`SELECT id, name, size_description, completed_transports, kilometres_travelled FROM vanscout_carrier_vehicles WHERE carrier_id = ${carrierId} ORDER BY created_at ASC`,
+    sql`
+      SELECT review.id, review.rating, review.feedback, reviewer.first_name AS customer_name, review.created_at
+      FROM vanscout_carrier_reviews review
+      JOIN vanscout_users reviewer ON reviewer.id = review.requester_id
+      WHERE review.carrier_id = ${carrierId}
+      ORDER BY review.created_at DESC
+      LIMIT 50
+    `,
+  ]);
   return {
-    carrierId: carrier.id,
-    carrierName: carrier.name,
+    carrierId: String(row.carrier_id),
+    carrierName: String(row.carrier_name),
     companyName: typeof row.company_name === "string" ? row.company_name : "",
     bio: typeof row.bio === "string" ? row.bio : "",
     completedTransports: Number(row.completed_transports ?? 0),
     profileImageId: typeof row.profile_image_id === "string" ? row.profile_image_id : null,
     imageIds: Array.isArray(row.image_ids) ? row.image_ids.map(String) : [],
+    ratingAverage: row.rating_average === null || row.rating_average === undefined ? null : Number(row.rating_average),
+    ratingCount: Number(row.rating_count ?? 0),
+    vehicles: vehicles.map(raw => toVehicle(raw as Record<string, unknown>)),
+    reviews: reviews.map(raw => toReview(raw as Record<string, unknown>)),
   };
+}
+
+export async function getCarrierProfile(carrier: AppUser): Promise<CarrierProfile> {
+  const profile = await getPublicCarrierProfile(carrier.id);
+  if (!profile) throw new Error("Carrier profile not found");
+  return profile;
+}
+
+export async function addCarrierVehicle(carrierId: string, input: Omit<CarrierVehicle, "id">) {
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const rows = await sql`
+    INSERT INTO vanscout_carrier_vehicles (id, carrier_id, name, size_description, completed_transports, kilometres_travelled)
+    VALUES (${randomUUID()}, ${carrierId}, ${input.name}, ${input.sizeDescription}, ${input.completedTransports}, ${input.kilometresTravelled})
+    RETURNING id, name, size_description, completed_transports, kilometres_travelled
+  `;
+  return toVehicle(rows[0] as Record<string, unknown>);
+}
+
+export async function updateCarrierVehicle(carrierId: string, vehicleId: string, input: Omit<CarrierVehicle, "id">) {
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const rows = await sql`
+    UPDATE vanscout_carrier_vehicles
+    SET name = ${input.name}, size_description = ${input.sizeDescription}, completed_transports = ${input.completedTransports},
+      kilometres_travelled = ${input.kilometresTravelled}, updated_at = NOW()
+    WHERE id = ${vehicleId} AND carrier_id = ${carrierId}
+    RETURNING id, name, size_description, completed_transports, kilometres_travelled
+  `;
+  return rows[0] ? toVehicle(rows[0] as Record<string, unknown>) : null;
+}
+
+export async function deleteCarrierVehicle(carrierId: string, vehicleId: string) {
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const rows = await sql`DELETE FROM vanscout_carrier_vehicles WHERE id = ${vehicleId} AND carrier_id = ${carrierId} RETURNING id`;
+  return Boolean(rows[0]);
+}
+
+export async function submitCarrierReview(requesterId: string, transportId: string, rating: number, feedback: string) {
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const rows = await sql`
+    INSERT INTO vanscout_carrier_reviews (id, transport_request_id, carrier_id, requester_id, rating, feedback)
+    SELECT ${randomUUID()}, tr.id, offer.carrier_id, tr.requester_id, ${rating}, ${feedback}
+    FROM vanscout_transport_requests tr
+    JOIN vanscout_transport_offers offer ON offer.transport_request_id = tr.id AND offer.status = 'confirmed'
+    WHERE tr.id = ${transportId} AND tr.requester_id = ${requesterId} AND tr.status = 'completed'
+    ON CONFLICT (transport_request_id) DO NOTHING
+    RETURNING id
+  `;
+  return Boolean(rows[0]);
+}
+
+export async function completeDueTransports(appUrl = optionalEnv("APP_URL") || "https://vanscout.hr") {
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const completed = await sql`
+    UPDATE vanscout_transport_requests tr
+    SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+    FROM vanscout_transport_offers offer
+    WHERE offer.transport_request_id = tr.id AND offer.status = 'confirmed'
+      AND tr.status = 'carrier_booked' AND offer.available_date < CURRENT_DATE
+    RETURNING tr.id, tr.item_name, tr.requester_id, offer.carrier_id
+  `;
+  const invitations = await sql`
+    SELECT tr.id, tr.item_name, requester.email AS requester_email, carrier.name AS carrier_name
+    FROM vanscout_transport_requests tr
+    JOIN vanscout_transport_offers offer ON offer.transport_request_id = tr.id AND offer.status = 'confirmed'
+    JOIN vanscout_users requester ON requester.id = tr.requester_id
+    JOIN vanscout_users carrier ON carrier.id = offer.carrier_id
+    WHERE tr.status = 'completed' AND tr.review_invitation_sent_at IS NULL AND offer.available_date < CURRENT_DATE
+  `;
+  let sent = 0;
+  for (const raw of invitations) {
+    const invitation = raw as Record<string, unknown>;
+    const reviewUrl = new URL(`/customer/review/${String(invitation.id)}`, appUrl).toString();
+    try {
+      await sendTransportReviewEmail({ to: String(invitation.requester_email), transporterName: String(invitation.carrier_name), transportName: String(invitation.item_name), reviewUrl });
+      await sql`UPDATE vanscout_transport_requests SET review_invitation_sent_at = NOW() WHERE id = ${String(invitation.id)} AND review_invitation_sent_at IS NULL`;
+      sent += 1;
+    } catch (error) {
+      console.error("Unable to send transport review invitation", error);
+    }
+  }
+  return { completed: completed.length, invitationsSent: sent };
 }
 
 export async function updateCarrierProfile(carrier: AppUser, companyName: string, bio: string, gallery: { retainedImageIds: string[]; newImages: File[] } | null, profileImage: File | null) {
@@ -499,6 +627,9 @@ export async function listConversations(user: AppUser): Promise<Conversation[]> 
     SELECT offer.id AS offer_id, tr.id AS transport_id, tr.item_name, offer.price_cents, offer.vat_included,
       offer.available_date, offer.message AS offer_message,
       CASE WHEN $1 = offer.carrier_id THEN requester.name ELSE carrier.name END AS other_party_name,
+      CASE WHEN $1 = offer.carrier_id THEN requester.avatar_url ELSE carrier.avatar_url END AS other_party_avatar_url,
+      CASE WHEN $1 = offer.carrier_id THEN NULL
+           ELSE (SELECT photo.id FROM vanscout_carrier_profile_photos photo WHERE photo.carrier_id = carrier.id) END AS other_party_profile_image_id,
       CASE WHEN offer.confirmed_at IS NOT NULL AND $1 = offer.carrier_id THEN requester.email
            WHEN offer.confirmed_at IS NOT NULL THEN carrier.email ELSE NULL END AS other_party_email,
       CASE WHEN offer.confirmed_at IS NOT NULL AND $1 = offer.carrier_id THEN requester.phone_number
@@ -536,6 +667,8 @@ export async function listConversations(user: AppUser): Promise<Conversation[]> 
       transportId: String(row.transport_id),
       itemName: String(row.item_name),
       otherPartyName: String(row.other_party_name),
+      otherPartyAvatarUrl: typeof row.other_party_avatar_url === "string" ? row.other_party_avatar_url : null,
+      otherPartyProfileImageId: typeof row.other_party_profile_image_id === "string" ? row.other_party_profile_image_id : null,
       companyName: typeof row.company_name === "string" ? row.company_name : "",
       priceCents: Number(row.price_cents),
       vatIncluded: Boolean(row.vat_included),

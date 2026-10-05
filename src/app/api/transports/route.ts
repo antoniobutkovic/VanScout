@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
 import { createTransportRequest, listTransportRequests } from "@/lib/transports";
+import { completeDueTransports } from "@/lib/marketplace";
 
 const locationSchema = z.object({
   formatted: z.string().trim().min(1).max(500),
@@ -32,6 +33,7 @@ export async function GET(request: Request) {
   const requestedFilter = new URL(request.url).searchParams.get("status");
   const filter = requestedFilter === "completed" ? "completed" : requestedFilter === "all" ? "all" : "active";
   try {
+    await completeDueTransports(new URL(request.url).origin);
     return NextResponse.json({ transports: await listTransportRequests(user.id, filter) });
   } catch {
     return NextResponse.json({ error: "Unable to load transports" }, { status: 500 });
