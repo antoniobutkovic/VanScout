@@ -305,7 +305,6 @@ textarea { min-height: 105px; resize: vertical; }
 .google-sign-in { width: 100%; min-height: 52px; }
 .google-sign-in > div { width: 100%; min-height: 52px; display: flex; justify-content: center; }
 .google-sign-in [role="button"] { width: 100% !important; max-width: none !important; height: 44px !important; }
-.google-sign-in > div > div { width: 100%; }
 .google-sign-in.is-loading > div { opacity: .68; pointer-events: none; }
 .google-auth-error { margin: 10px 0 0; color: var(--red); font-size: 12px; }
 .auth-create-button { margin-top: 20px; }
