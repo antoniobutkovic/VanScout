@@ -13,7 +13,7 @@ const locationSchema = z.object({
 const preferencesSchema = z.object({
   distanceKm: z.number().int().min(10).max(10_000).nullable(),
   pickupArea: locationSchema.nullable(),
-  pickupRadiusKm: z.number().int().min(5).max(500),
+  pickupRadiusKm: z.number().int().min(5).max(5_000),
 });
 
 export async function GET(request: Request) {

@@ -519,6 +519,7 @@ const CROATIAN: Record<string, string> = {
   "Mark as delivered": "Označi kao dostavljeno",
   Customer: "Korisnik",
   "Open navigation": "Otvori navigaciju",
+  "Open in Google Maps": "Otvori u Google kartama",
   "Share live location with customer": "Podijeli lokaciju uživo s korisnikom",
   "Your customer will receive a private tracking link until delivery is completed.": "Korisnik će primati privatnu poveznicu za praćenje dok se dostava ne završi.",
   Traffic: "Gužva",

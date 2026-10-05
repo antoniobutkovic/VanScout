@@ -14,16 +14,21 @@ type AddressPickerProps = {
 };
 
 const ZAGREB: [number, number] = [15.9819, 45.8150];
-const EMPTY_RADIUS_DATA = { type: "FeatureCollection" as const, features: [] };
+type MapCoordinate = { longitude: number; latitude: number };
+const DEFAULT_RADIUS_CENTER: MapCoordinate = { longitude: ZAGREB[0], latitude: ZAGREB[1] };
 
 function resultSecondaryLine(result: AddressLocation) {
   return [result.addressLine1, result.addressLine2, result.city, result.postcode].filter(Boolean).join(" · ");
 }
 
-function radiusCircle(location: AddressLocation, radiusKm: number) {
+function coordinatesOf(location: AddressLocation): MapCoordinate {
+  return { longitude: location.longitude, latitude: location.latitude };
+}
+
+function radiusCircle(center: MapCoordinate, radiusKm: number) {
   const earthRadiusKm = 6371;
-  const latitude = location.latitude * Math.PI / 180;
-  const longitude = location.longitude * Math.PI / 180;
+  const latitude = center.latitude * Math.PI / 180;
+  const longitude = center.longitude * Math.PI / 180;
   const angularDistance = radiusKm / earthRadiusKm;
   const coordinates: [number, number][] = [];
   for (let point = 0; point <= 72; point += 1) {
@@ -35,10 +40,45 @@ function radiusCircle(location: AddressLocation, radiusKm: number) {
   return { type: "Feature" as const, properties: {}, geometry: { type: "Polygon" as const, coordinates: [coordinates] } };
 }
 
-function updateRadiusLayer(map: import("maplibre-gl").Map, location: AddressLocation | null, radiusKm?: number) {
-  const sourceId = "address-picker-radius";
-  const source = map.getSource(sourceId) as import("maplibre-gl").GeoJSONSource | undefined;
-  if (source) source.setData(location && radiusKm ? radiusCircle(location, radiusKm) : EMPTY_RADIUS_DATA);
+function syncRadiusOverlay(map: import("maplibre-gl").Map, center: MapCoordinate, radiusKm?: number) {
+  const container = map.getContainer();
+  let overlay = container.querySelector<HTMLDivElement>(".address-picker-radius-overlay");
+  if (!radiusKm) {
+    overlay?.remove();
+    return;
+  }
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "address-picker-radius-overlay";
+    overlay.setAttribute("aria-hidden", "true");
+    container.append(overlay);
+  }
+
+  const ring = radiusCircle(center, radiusKm).geometry.coordinates[0];
+  const north = map.project(ring[0]);
+  const east = map.project(ring[18]);
+  const south = map.project(ring[36]);
+  const west = map.project(ring[54]);
+  overlay.style.left = `${Math.min(east.x, west.x)}px`;
+  overlay.style.top = `${Math.min(north.y, south.y)}px`;
+  overlay.style.width = `${Math.abs(east.x - west.x)}px`;
+  overlay.style.height = `${Math.abs(south.y - north.y)}px`;
+}
+
+function fitMapToRadius(map: import("maplibre-gl").Map, center: MapCoordinate, radiusKm: number) {
+  const coordinates = radiusCircle(center, radiusKm).geometry.coordinates[0];
+  const longitudes = coordinates.map(([longitude]) => longitude);
+  const latitudes = coordinates.map(([, latitude]) => latitude);
+  map.resize();
+  map.fitBounds([
+    [Math.min(...longitudes), Math.min(...latitudes)],
+    [Math.max(...longitudes), Math.max(...latitudes)],
+  ], {
+    padding: { top: 64, right: 46, bottom: 46, left: 46 },
+    maxZoom: 14,
+    essential: true,
+    duration: 550,
+  });
 }
 
 export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true, showCurrentLocation = true, radiusKm }: AddressPickerProps) {
@@ -56,8 +96,10 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
   const resolveCoordinatesRef = useRef<(latitude: number, longitude: number) => void>(() => undefined);
   const valueRef = useRef<AddressLocation | null>(value);
   const radiusKmRef = useRef(radiusKm);
+  const radiusCenterRef = useRef<MapCoordinate>(value ? coordinatesOf(value) : DEFAULT_RADIUS_CENTER);
   valueRef.current = value;
   radiusKmRef.current = radiusKm;
+  if (value) radiusCenterRef.current = coordinatesOf(value);
 
   useEffect(() => {
     if (value?.formatted) setQuery(value.formatted);
@@ -96,9 +138,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
     void import("maplibre-gl").then(maplibregl => {
       if (disposed || !mapContainerRef.current) return;
       const initialLocation = valueRef.current;
-      const initialLongitude = initialLocation?.longitude ?? ZAGREB[0];
-      const initialLatitude = initialLocation?.latitude ?? ZAGREB[1];
-      const initialRadiusData = initialLocation && radiusKmRef.current ? radiusCircle(initialLocation, radiusKmRef.current) : EMPTY_RADIUS_DATA;
+      const initialCenter = initialLocation ? coordinatesOf(initialLocation) : radiusCenterRef.current;
 
       const nextMap = new maplibregl.Map({
         container: mapContainerRef.current,
@@ -111,31 +151,34 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
               tileSize: 256,
               attribution: "© <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors · <a href=\"https://www.geoapify.com/\" target=\"_blank\" rel=\"noreferrer\">Geoapify</a>",
             },
-            "address-picker-radius": { type: "geojson", data: initialRadiusData },
           },
           layers: [
             { id: "geoapify", type: "raster", source: "geoapify" },
-            { id: "address-picker-radius-fill", type: "fill", source: "address-picker-radius", paint: { "fill-color": "#48623d", "fill-opacity": .24 } },
-            { id: "address-picker-radius-outline", type: "line", source: "address-picker-radius", paint: { "line-color": "#284723", "line-width": 3, "line-opacity": .95 } },
           ],
         },
-        center: [initialLongitude, initialLatitude],
+        center: [initialCenter.longitude, initialCenter.latitude],
         zoom: initialLocation ? 16 : 11,
       });
       nextMap.on("dragend", () => {
         const coordinates = nextMap.getCenter();
+        radiusCenterRef.current = { longitude: coordinates.lng, latitude: coordinates.lat };
+        syncRadiusOverlay(nextMap, radiusCenterRef.current, radiusKmRef.current);
         resolveCoordinatesRef.current(coordinates.lat, coordinates.lng);
       });
       nextMap.on("click", event => {
+        radiusCenterRef.current = { longitude: event.lngLat.lng, latitude: event.lngLat.lat };
+        syncRadiusOverlay(nextMap, radiusCenterRef.current, radiusKmRef.current);
         nextMap.easeTo({ center: event.lngLat, duration: 300 });
         resolveCoordinatesRef.current(event.lngLat.lat, event.lngLat.lng);
       });
+      nextMap.on("move", () => syncRadiusOverlay(nextMap, radiusCenterRef.current, radiusKmRef.current));
       nextMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       map = nextMap;
       mapRef.current = nextMap;
       const initializeRadius = () => {
         if (disposed) return;
-        updateRadiusLayer(nextMap, valueRef.current, radiusKmRef.current);
+        syncRadiusOverlay(nextMap, radiusCenterRef.current, radiusKmRef.current);
+        if (radiusKmRef.current) fitMapToRadius(nextMap, radiusCenterRef.current, radiusKmRef.current);
         setIsMapReady(true);
       };
       if (nextMap.isStyleLoaded()) initializeRadius();
@@ -150,21 +193,21 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
   }, []);
 
   useEffect(() => {
-    if (!value || !mapRef.current || !isMapReady) return;
-    const coordinates: [number, number] = [value.longitude, value.latitude];
-    if (radiusKm) {
-      const latitudeOffset = radiusKm / 111.32;
-      const longitudeOffset = radiusKm / (111.32 * Math.cos(value.latitude * Math.PI / 180));
-      mapRef.current.fitBounds([[value.longitude - longitudeOffset, value.latitude - latitudeOffset], [value.longitude + longitudeOffset, value.latitude + latitudeOffset]], { padding: 46, maxZoom: 14, essential: true, duration: 550 });
-    } else {
-      mapRef.current.flyTo({ center: coordinates, zoom: Math.max(mapRef.current.getZoom(), 16), essential: true, duration: 550 });
-    }
-  }, [isMapReady, radiusKm, value?.latitude, value?.longitude]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isMapReady) return;
-    updateRadiusLayer(map, value, radiusKm);
+    if (!mapRef.current || !isMapReady) return;
+    const center = value ? coordinatesOf(value) : radiusCenterRef.current;
+    radiusCenterRef.current = center;
+    const coordinates: [number, number] = [center.longitude, center.latitude];
+    const frame = window.requestAnimationFrame(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      syncRadiusOverlay(map, center, radiusKm);
+      if (radiusKm) {
+        fitMapToRadius(map, center, radiusKm);
+      } else if (value) {
+        map.flyTo({ center: coordinates, zoom: Math.max(map.getZoom(), 16), essential: true, duration: 550 });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [isMapReady, radiusKm, value?.latitude, value?.longitude]);
 
   useEffect(() => {
