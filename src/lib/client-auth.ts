@@ -12,7 +12,13 @@ let sessionExpiryHandlerInstalled = false;
 function isSameOriginApiRequest(input: RequestInfo | URL) {
   const rawUrl = input instanceof Request ? input.url : input.toString();
   const url = new URL(rawUrl, window.location.origin);
-  return url.origin === window.location.origin && url.pathname.startsWith("/api/") && url.pathname !== "/api/auth/logout";
+  return url.origin === window.location.origin
+    && url.pathname.startsWith("/api/")
+    // This endpoint is also used to determine whether a visitor is signed in
+    // on public pages. A 401 there is an expected "not signed in" result, not
+    // an expired-session redirect.
+    && url.pathname !== "/api/auth/logout"
+    && url.pathname !== "/api/auth/me";
 }
 
 /**
@@ -66,7 +72,10 @@ export async function fetchSessionUser(signal?: AbortSignal): Promise<SessionUse
   });
 
   if (response.status === 401) {
-    expireAuthSession();
+    // Callers decide what to do with an anonymous visitor. In particular, the
+    // home page uses this probe to remain publicly accessible; protected
+    // routes redirect via RequireSession.
+    window.localStorage.removeItem("auth_token");
     return null;
   }
   if (!response.ok) throw new Error("Unable to restore session");
