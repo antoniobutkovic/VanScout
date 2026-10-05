@@ -98,6 +98,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
       const initialLocation = valueRef.current;
       const initialLongitude = initialLocation?.longitude ?? ZAGREB[0];
       const initialLatitude = initialLocation?.latitude ?? ZAGREB[1];
+      const initialRadiusData = initialLocation && radiusKmRef.current ? radiusCircle(initialLocation, radiusKmRef.current) : EMPTY_RADIUS_DATA;
 
       const nextMap = new maplibregl.Map({
         container: mapContainerRef.current,
@@ -110,7 +111,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
               tileSize: 256,
               attribution: "© <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors · <a href=\"https://www.geoapify.com/\" target=\"_blank\" rel=\"noreferrer\">Geoapify</a>",
             },
-            "address-picker-radius": { type: "geojson", data: EMPTY_RADIUS_DATA },
+            "address-picker-radius": { type: "geojson", data: initialRadiusData },
           },
           layers: [
             { id: "geoapify", type: "raster", source: "geoapify" },
@@ -132,10 +133,13 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
       nextMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       map = nextMap;
       mapRef.current = nextMap;
-      nextMap.on("load", () => {
+      const initializeRadius = () => {
+        if (disposed) return;
         updateRadiusLayer(nextMap, valueRef.current, radiusKmRef.current);
         setIsMapReady(true);
-      });
+      };
+      if (nextMap.isStyleLoaded()) initializeRadius();
+      else nextMap.once("load", initializeRadius);
     });
 
     return () => {
