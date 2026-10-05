@@ -185,7 +185,9 @@ function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: {
     window.google.accounts.id.renderButton(container, {
       type: "standard",
       theme: "outline",
-      size: "large",
+      // Google only renders the personalized account-card variant for a large
+      // standard button. Medium keeps a consistent generic sign-in button.
+      size: "medium",
       text: "continue_with",
       shape: "rectangular",
       logo_alignment: "center",
