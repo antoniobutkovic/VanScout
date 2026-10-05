@@ -730,24 +730,41 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .public-carrier-profile > p { margin: 22px 0; line-height: 1.55; }
 .public-carrier-profile section { display: grid; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--stone); }
 .public-carrier-profile .vehicle { font-size: 28px; }
-.public-carrier-profile blockquote { display: grid; gap: 7px; margin: 0; padding: 15px; background: var(--sage); }
-.public-carrier-profile blockquote > b { color: var(--clay); letter-spacing: .08em; }
-.public-carrier-profile blockquote > span { font-size: 14px; line-height: 1.5; }
-.public-carrier-profile blockquote footer { font-size: 11px; color: var(--muted); }
+.profile-stats { display: flex; flex-wrap: wrap; gap: 7px 15px; margin-top: 7px; color: var(--muted); font-size: 12px; }
+.profile-stats span + span { padding-left: 15px; border-left: 1px solid var(--stone); }
+.carrier-reviews { border-top: 1px solid var(--stone); }
+.carrier-reviews details { width: 100%; }
+.carrier-reviews summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; cursor: pointer; list-style: none; }
+.carrier-reviews summary::-webkit-details-marker { display: none; }
+.carrier-reviews summary > span:first-child { display: grid; gap: 4px; }
+.carrier-reviews summary b { font-size: 17px; }
+.carrier-reviews summary small { color: var(--muted); font-size: 12px; }
+.review-disclosure { color: var(--moss); font-size: 22px; line-height: 1; transition: transform .2s ease; }
+.carrier-reviews details[open] .review-disclosure { transform: rotate(180deg); }
+.review-list { display: grid; gap: 10px; padding-bottom: 20px; }
+.review-list blockquote { display: grid; gap: 7px; margin: 0; padding: 15px; background: var(--sage); }
+.review-list blockquote > b { color: var(--clay); letter-spacing: .08em; }
+.review-list blockquote > span { font-size: 14px; line-height: 1.5; }
+.review-list blockquote footer { font-size: 11px; color: var(--muted); }
 .vehicle-manager { display: grid; gap: 13px; }
-.vehicle-manager > header { display: grid !important; justify-content: initial !important; gap: 4px; }
+.vehicle-manager > header { display: flex !important; align-items: end !important; justify-content: space-between !important; gap: 18px; }
+.vehicle-manager > header > div { display: grid; gap: 4px; }
 .vehicle-manager > header span { color: var(--muted); font-size: 12px; font-weight: 400; }
 .vehicle-manager > article { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 12px; padding: 15px; background: var(--sage); }
 .vehicle-manager > article > div:first-child { font-size: 28px; }
 .vehicle-manager > article > div:nth-child(2) { display: grid; gap: 4px; }
 .vehicle-manager > article small { color: var(--muted); font-size: 11px; }
 .vehicle-manager > article button { font-size: 12px; }
-.vehicle-manager form { display: grid; gap: 13px; padding: 19px; background: var(--white); border: 1px solid var(--stone); }
-.vehicle-manager form h3 { margin: 0; font-size: 18px; }
-.vehicle-manager form label { display: grid; gap: 6px; font-size: 12px; font-weight: 800; }
-.vehicle-manager form input { min-height: 42px; padding: 9px 11px; border: 1px solid var(--stone); background: var(--paper); }
-.vehicle-manager form > div:last-child { display: flex; align-items: center; gap: 15px; }
-.vehicle-stat-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.vehicle-empty-state { margin: 0; padding: 20px; border: 1px dashed var(--stone); color: var(--muted); font-size: 13px; }
+.vehicle-dialog-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 24px; overflow-y: auto; background: rgba(22,30,19,.42); }
+.vehicle-dialog { position: relative; width: min(100%, 620px); padding: clamp(28px, 5vw, 46px); background: var(--paper); box-shadow: 0 20px 60px rgba(22,30,19,.24); }
+.vehicle-dialog .close { position: absolute; top: 15px; right: 18px; }
+.vehicle-dialog form { display: grid; gap: 16px; }
+.vehicle-dialog form h3 { margin: 0; font-size: 28px; }
+.vehicle-dialog form > p { margin: -5px 0 5px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.vehicle-dialog form label { display: grid; gap: 7px; font-size: 13px; font-weight: 800; }
+.vehicle-dialog form input { min-height: 50px; padding: 10px 13px; border: 1px solid var(--stone); background: var(--white); font: inherit; }
+.vehicle-dialog form > div:last-child { display: flex; align-items: center; gap: 15px; margin-top: 4px; }
 .vehicles > header { margin-top: 12px; }
 .vehicles .manager { margin-top: 25px; display: grid; grid-template-columns: auto 1fr auto; padding: 22px; }
 .vehicles .manager small { color: var(--muted); font-size: 11px; }
@@ -912,10 +929,10 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
-.privacy-controls { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--stone); }
-.privacy-controls h2 { margin: 0 0 8px; }
-.privacy-controls > p { color: var(--muted); }
-.privacy-controls > div { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.account-delete-control { margin-top: 11px; }
+.account-delete-control button { padding: 0; border: 0; background: none; color: var(--red); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.account-delete-control button:disabled { cursor: not-allowed; opacity: .6; }
+.account-delete-control .auth-message { margin: 8px 0 0; }
 .button.danger { background: #8b2f25; color: var(--white); }
 .legal-policy { display: grid; gap: 18px; max-width: 900px; margin: 0 auto 72px; }
 .legal-policy > section { padding: 26px; background: var(--white); border: 1px solid var(--stone); }
