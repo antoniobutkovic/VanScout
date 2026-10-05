@@ -515,6 +515,19 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .deal-context > span small { color: var(--muted); }
 .deal-context.confirmed { background: var(--sage); }
 .thread { overflow: auto; padding: 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 11px; }
+.google-maps-location-share { align-self: stretch; display: grid; grid-template-columns: 1fr auto; gap: 14px; padding: 16px; border: 1px solid color-mix(in srgb, var(--moss) 45%, var(--stone)); background: #f1f5ed; }
+.google-maps-location-share h2 { margin: 2px 0 5px; font-size: 17px; }
+.google-maps-location-share p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.google-maps-location-share .eyebrow { color: var(--moss); }
+.google-maps-location-share > .button { align-self: start; }
+.google-maps-location-steps { grid-column: 1 / -1; display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--stone); }
+.google-maps-location-steps ol { display: grid; gap: 4px; margin: 0; padding-left: 19px; color: var(--ink); font-size: 12px; line-height: 1.4; }
+.google-maps-location-steps label { display: grid; gap: 6px; font-size: 11px; font-weight: 800; }
+.google-maps-location-steps input { width: 100%; padding: 9px 10px; }
+.google-maps-location-steps .auth-message { margin: 0; }
+.google-maps-location-steps .button { justify-self: start; }
+.message-map-link { color: inherit; font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
+.tracking-link-received { align-self: stretch; margin: 0; padding: 10px 12px; border: 1px solid var(--sage); background: var(--mist); color: var(--ink); font-size: 12px; line-height: 1.4; }
 .bubble { margin: 0; padding: 11px 13px; font-size: 13px; max-width: 66%; color: var(--ink); }
 .bubble.theirs { background: var(--mist); }
 .bubble.mine { background: var(--moss); color: var(--white); align-self: flex-end; }
@@ -844,6 +857,8 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
   .messages > aside { display: flex; overflow-x: auto; border: 1px solid var(--stone); border-bottom: 0; }
   .conversation { min-width: 230px; border-right: 1px solid var(--stone); border-bottom: 0; }
   .messages > article { border: 1px solid var(--stone); }
+  .google-maps-location-share { grid-template-columns: 1fr; }
+  .google-maps-location-share > .button { justify-self: start; }
   .bubble { max-width: 86%; }
   .job-layout { grid-template-columns: 1fr; }
   .job-layout aside { display: none; }

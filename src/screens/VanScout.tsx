@@ -14,6 +14,7 @@ import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from 
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
 import { offerPriceFromEnteredAmount, offerPriceFromTotal } from "../lib/offer-pricing";
 import { googleMapsDirectionsUrl } from "../lib/google-maps-directions";
+import { googleMapsUrl } from "../lib/google-maps-sharing";
 import type { AddressLocation } from "../lib/location";
 import type { TransportRequest, TransportStatus } from "../lib/transport-types";
 import type { CarrierProfile as CarrierProfileData, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
@@ -31,6 +32,68 @@ const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Review"
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TRANSPORT_PAGE_SIZE = 20;
 const ITEM_NAME_MAX_LENGTH = 200;
+
+function GoogleMapsLocationShare({ onSend }: { onSend: (url: string) => Promise<void> }) {
+  const { t } = useLanguage();
+  const [link, setLink] = useState("");
+  const [openedMaps, setOpenedMaps] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+
+  const openGoogleMaps = () => {
+    window.open("https://www.google.com/maps", "_blank", "noopener,noreferrer");
+    setOpenedMaps(true);
+    setSent(false);
+  };
+
+  const send = async () => {
+    const trackingLink = googleMapsUrl(link);
+    if (!trackingLink) {
+      setError(t("Paste a valid Google Maps link"));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSend(trackingLink);
+      setLink("");
+      setSent(true);
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : t("Unable to send message"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section className="google-maps-location-share">
+    <div>
+      <p className="eyebrow">{t("Live location")}</p>
+      <h2>{t("Share live location with customer")}</h2>
+      <p>{t("Google Maps creates the temporary tracking link from your current phone location. Paste it here and VanScout will send it to the customer.")}</p>
+    </div>
+    <button className="button dark short" type="button" onClick={openGoogleMaps}>{t("Open Google Maps")}</button>
+    {openedMaps && <div className="google-maps-location-steps">
+      <ol>
+        <li>{t("In Google Maps, open your profile and choose Location sharing.")}</li>
+        <li>{t("Choose a sharing duration, then copy the link.")}</li>
+        <li>{t("Paste the copied link below to send it to the customer.")}</li>
+      </ol>
+      <label>{t("Google Maps tracking link")}<input type="url" value={link} onChange={event => { setLink(event.target.value); setError(""); setSent(false); }} placeholder="https://maps.app.goo.gl/..." inputMode="url" autoComplete="off" /></label>
+      {error && <p className="auth-message error" role="alert">{error}</p>}
+      {sent && <p className="auth-message success" role="status">{t("Tracking link sent to customer")}</p>}
+      <button className="button moss short" type="button" disabled={saving || !link.trim()} onClick={() => void send()}>{saving ? t("Sending…") : t("Send tracking link to customer")}</button>
+    </div>}
+  </section>;
+}
+
+function MessageBody({ body }: { body: string }) {
+  const { t } = useLanguage();
+  const trackingLink = googleMapsUrl(body);
+  return trackingLink && body.trim() === trackingLink
+    ? <a className="message-map-link" href={trackingLink} target="_blank" rel="noreferrer">{t("Open Google Maps live location")}</a>
+    : <>{body}</>;
+}
 
 function Arrow() { return null; }
 function BackIcon() { return <svg className="back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>; }
@@ -1318,6 +1381,22 @@ function LiveMessages() {
     }
   };
 
+  const sendGoogleMapsTrackingLink = async (trackingLink: string) => {
+    const token = getAuthToken();
+    if (!token || !selectedId) throw new Error(t("Unable to send message"));
+    const response = await fetch(`/api/conversations/${selectedId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ body: trackingLink }),
+    });
+    const payload = await response.json() as { message?: ChatMessage; error?: string; requiredCents?: number; balanceCents?: number };
+    if (!response.ok) {
+      const missing = Math.max(0, Number(payload.requiredCents || 0) - Number(payload.balanceCents || 0));
+      throw new Error(response.status === 402 ? t("Add {amount} in credits to continue.", { amount: formatEuro(missing) }) : payload.error || t("Unable to send message"));
+    }
+    if (payload.message) setMessages(current => current.some(message => message.id === payload.message?.id) ? current : [...current, payload.message as ChatMessage]);
+  };
+
   const agree = async () => {
     const token = getAuthToken();
     if (!token || !selected) return;
@@ -1362,7 +1441,7 @@ function LiveMessages() {
       {selected && <article>
         <header><div><span className="avatar">{selected.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><span><b>{selected.otherPartyName}</b><small>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
         <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}</div>
-        <div className="thread">{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}{selected.status === "confirmed" && <div className="contact-note contact-revealed"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
+        <div className="thread">{selected.status === "confirmed" && selected.role === "transporter" && <GoogleMapsLocationShare onSend={sendGoogleMapsTrackingLink} />}{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}><MessageBody body={selected.offerMessage} /></p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}><MessageBody body={message.body} /></p>)}{selected.status === "confirmed" && selected.role === "requester" && messages.some(message => message.senderId !== userId && googleMapsUrl(message.body)) && <p className="tracking-link-received">{t("Your transporter shared a Google Maps location link. Open it in the message above to follow the journey.")}</p>}{selected.status === "confirmed" && <div className="contact-note contact-revealed"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
         {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form>}
       </article>}
     </div>}
