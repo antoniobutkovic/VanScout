@@ -25,7 +25,9 @@ function hasPhoneNumber(value: string) {
   const text = normaliseForContactDetection(value);
   if (/(?:^|[^\d])\d{7,15}(?!\d)/.test(text)) return true;
 
-  const candidates = text.match(/(?:\+|00)\s*(?:\d[\s().-]*){6,14}\d|(?:\(?\d{1,4}\)?[\s.-]){2,5}\d{2,4}/g) || [];
+  // Treat separators as cosmetic. People can otherwise evade a conventional
+  // grouping matcher by splitting a number at arbitrary digit positions.
+  const candidates = text.match(/(?:\+|00)?\s*\d(?:[\s()./-]*\d){6,14}/g) || [];
   return candidates.some(candidate => {
     const digitCount = digitsIn(candidate).length;
     return digitCount >= 7 && digitCount <= 15 && !looksLikeDate(candidate);
