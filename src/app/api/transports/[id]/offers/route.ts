@@ -9,7 +9,7 @@ const offerSchema = z.object({
   priceCents: z.number().int().positive().max(100_000_000),
   vatIncluded: z.boolean().default(true),
   availableDate: z.string().date(),
-  message: z.string().trim().max(2000).default(""),
+  message: z.string().trim().min(1, "Enter a message before sending").max(2000),
 });
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -28,7 +28,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const user = await authenticatedUser(request);
   if (!user || user.role !== "transporter") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const parsed = offerSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Enter a valid price and date" }, { status: 400 });
+  if (!parsed.success) {
+    const missingMessage = parsed.error.issues.some(issue => issue.path[0] === "message");
+    return NextResponse.json({ error: missingMessage ? "Enter a message before sending" : "Enter a valid price and date" }, { status: 400 });
+  }
   const { id } = await context.params;
   try {
     const offer = await createOrUpdateOffer(user, id, parsed.data);

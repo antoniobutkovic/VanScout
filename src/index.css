@@ -438,6 +438,9 @@ dd { margin: 0; font-size: 13px; font-weight: 700; }
 .avatar.large img { width: 100%; height: 100%; object-fit: cover; }
 .offer-person { display: grid; gap: 4px; }
 .offer-person button { border: 0; padding: 0; background: transparent; font-size: 15px; font-weight: 800; text-align: left; }
+.offer-profile-trigger { width: 100%; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.offer-profile-trigger:hover b { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.offer-profile-trigger:focus-visible { outline: 2px solid var(--moss); outline-offset: 4px; }
 .offer-person span, .offer-person small, .offer-time span, .price span { font-size: 11px; color: var(--muted); }
 .offer-time { display: grid; gap: 5px; font-size: 12px; }
 .offer > p { font-size: 12px; margin: 0; line-height: 1.42; }
@@ -501,7 +504,7 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .conversation span:not(.avatar) { display: grid; gap: 3px; }
 .conversation small, .conversation i { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; font-style: normal; }
 .conversation b { font-size: 13px; }
-.messages > article { display: grid; grid-template-rows: auto auto 1fr auto; min-width: 0; }
+.messages > article { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .messages > article > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--stone); }
 .messages > article > header > div { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 11px; }
 .messages > article > header .avatar { flex: 0 0 43px; aspect-ratio: 1; }
@@ -520,14 +523,16 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .deal-context > span small { color: var(--muted); }
 .deal-context.confirmed { flex-wrap: nowrap; gap: 20px; background: var(--sage); }
 .deal-context .deal-contact { flex: 0 1 auto; align-self: center; padding: 0; border-top: 0; border-bottom: 0; background: transparent; text-align: right; }
-.thread { overflow: auto; padding: 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 11px; }
+.thread { min-height: 0; overflow-y: auto; overflow-x: hidden; -ms-overflow-style: none; scrollbar-width: none; padding: 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 11px; }
+.thread::-webkit-scrollbar { display: none; }
 .bubble { margin: 0; padding: 11px 13px; font-size: 13px; max-width: 66%; color: var(--ink); }
 .bubble.theirs { background: var(--mist); }
 .bubble.mine { background: var(--moss); color: var(--white); align-self: flex-end; }
-.contact-note { align-self: stretch; text-align: center; font-size: 11px; color: var(--muted); padding: 9px; border-top: 1px solid var(--stone); border-bottom: 1px solid var(--stone); }
+.contact-note { align-self: stretch; text-align: center; font-size: 11px; color: var(--muted); padding: 9px; }
+.compose-contact-note { margin: 0; padding: 6px 14px 0; }
 .contact-revealed { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px 16px; background: var(--sage); color: var(--ink); }
 .contact-revealed a { color: var(--moss); font-weight: 800; }
-.messages form { padding: 14px; display: grid; grid-template-columns: 1fr 42px; gap: 8px; border-top: 1px solid var(--stone); }
+.messages form { padding: 14px; display: grid; grid-template-columns: 1fr 42px; gap: 8px; }
 .messages form input { padding: 10px 12px; }
 .messages form button { border: 0; background: var(--moss); color: var(--white); font-size: 18px; }
 .messages form button:disabled { cursor: not-allowed; opacity: .35; }
@@ -611,10 +616,10 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .make-offer > form { display: grid; gap: 18px; }
 .make-offer > form > label { margin: 0; }
 .make-offer > form input[type="date"] { min-height: 52px; padding: 0 14px; background: var(--white); }
-.vat-selection { display: flex; flex-wrap: wrap; gap: 9px; margin: 0; padding: 0; border: 0; }
-.vat-selection legend { width: 100%; margin-bottom: 8px; font-size: 12px; font-weight: 800; }
-.vat-selection label { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 13px; border: 1px solid var(--stone); background: var(--white); font-size: 12px; font-weight: 700; cursor: pointer; }
-.vat-selection input { margin: 0; accent-color: var(--moss); }
+.vat-selection { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.vat-selection button { width: 100%; min-height: 52px; border: 1px solid var(--stone); background: var(--white); color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.vat-selection button:hover, .vat-selection button.selected { border-color: var(--moss); background: var(--moss-soft); }
+.vat-selection button:focus-visible { outline: 3px solid rgba(53,74,46,.28); outline-offset: 2px; }
 .offer-price-preview { display: grid; gap: 8px; padding: 14px; background: var(--white); }
 .offer-price-preview > span:first-child { color: var(--muted); font-size: 11px; font-weight: 800; }
 .offer-price-preview .offer-price-breakdown strong { font-size: 20px; }

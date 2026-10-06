@@ -82,7 +82,7 @@ export async function listMarketplaceTransports(carrierId: string, { limit = 20,
 export async function createOrUpdateOffer(carrier: AppUser, transportId: string, input: { priceCents: number; vatIncluded: boolean; availableDate: string; message: string }): Promise<(TransportOffer & { requesterId: string }) | null> {
   if (hasRestrictedContactDetails(input.message)) throw new RestrictedContactDetailsError();
   await ensureDatabaseSchema();
-  await requireCarrierCredits(carrier.id, input.priceCents);
+  await requireCarrierCredits(carrier.id, input.priceCents, input.vatIncluded);
   const sql = sqlClient();
   const encryptedOfferMessage = encryptMessage(input.message);
   const rows = await sql`
@@ -193,8 +193,9 @@ export async function listCarrierOffers(carrierId: string, confirmedOnly = false
   });
 }
 
-export function commissionForPrice(priceCents: number) {
-  return Math.ceil(priceCents * 0.05);
+export function commissionForPrice(priceCents: number, vatIncluded = true) {
+  const enteredPriceCents = vatIncluded ? priceCents : Math.round(priceCents * 100 / 125);
+  return Math.ceil(enteredPriceCents * 0.05);
 }
 
 export class InsufficientCreditsError extends Error {
@@ -204,7 +205,7 @@ export class InsufficientCreditsError extends Error {
   }
 }
 
-async function requireCarrierCredits(carrierId: string, priceCents: number) {
+async function requireCarrierCredits(carrierId: string, priceCents: number, vatIncluded = true) {
   const sql = sqlClient();
   await sql`
     INSERT INTO vanscout_carrier_credit_accounts (carrier_id)
@@ -213,7 +214,7 @@ async function requireCarrierCredits(carrierId: string, priceCents: number) {
   `;
   const rows = await sql`SELECT balance_cents FROM vanscout_carrier_credit_accounts WHERE carrier_id = ${carrierId}`;
   const balanceCents = Number(rows[0]?.balance_cents ?? 0);
-  const requiredCents = commissionForPrice(priceCents);
+  const requiredCents = commissionForPrice(priceCents, vatIncluded);
   if (balanceCents < requiredCents) throw new InsufficientCreditsError(requiredCents, balanceCents);
   return { requiredCents, balanceCents };
 }
@@ -275,7 +276,10 @@ async function tryFinalizeOffer(offerId: string) {
   const rows = await sql.query(`
     WITH candidate AS MATERIALIZED (
       SELECT offer.id AS offer_id, offer.transport_request_id, offer.carrier_id,
-        ((offer.price_cents * 5 + 99) / 100)::int AS commission_cents
+        CASE WHEN offer.vat_included
+          THEN ((offer.price_cents * 5 + 99) / 100)::int
+          ELSE CEIL((ROUND(offer.price_cents * 100.0 / 125) * 5) / 100.0)::int
+        END AS commission_cents
       FROM vanscout_transport_offers offer
       JOIN vanscout_transport_requests tr ON tr.id = offer.transport_request_id
       JOIN vanscout_transport_selections selection
@@ -283,7 +287,10 @@ async function tryFinalizeOffer(offerId: string) {
       JOIN vanscout_carrier_credit_accounts account ON account.carrier_id = offer.carrier_id
       WHERE offer.id = $1 AND offer.status = 'pending' AND offer.carrier_agreed_at IS NOT NULL
         AND tr.status = 'looking_for_carriers'
-        AND account.balance_cents >= ((offer.price_cents * 5 + 99) / 100)::int
+        AND account.balance_cents >= CASE WHEN offer.vat_included
+          THEN ((offer.price_cents * 5 + 99) / 100)::int
+          ELSE CEIL((ROUND(offer.price_cents * 100.0 / 125) * 5) / 100.0)::int
+        END
       FOR UPDATE OF offer, account
     ), debited AS (
       UPDATE vanscout_carrier_credit_accounts account
@@ -350,7 +357,7 @@ export async function agreeToOffer(offerId: string, carrierId: string) {
   await ensureDatabaseSchema();
   const sql = sqlClient();
   const available = await sql`
-    SELECT offer.price_cents
+    SELECT offer.price_cents, offer.vat_included
     FROM vanscout_transport_offers offer
     JOIN vanscout_transport_requests tr ON tr.id = offer.transport_request_id
     WHERE offer.id = ${offerId} AND offer.carrier_id = ${carrierId} AND offer.status = 'pending'
@@ -358,7 +365,7 @@ export async function agreeToOffer(offerId: string, carrierId: string) {
     LIMIT 1
   `;
   if (!available[0]) return null;
-  await requireCarrierCredits(carrierId, Number(available[0].price_cents));
+  await requireCarrierCredits(carrierId, Number(available[0].price_cents), Boolean(available[0].vat_included));
   const agreed = await sql`
     UPDATE vanscout_transport_offers offer
     SET carrier_agreed_at = COALESCE(offer.carrier_agreed_at, NOW()), updated_at = NOW()
@@ -722,7 +729,7 @@ async function canUseConversation(offerId: string, userId: string, requireWritab
   return Boolean(rows[0]);
 }
 
-export async function listMessages(offerId: string, userId: string): Promise<ChatMessage[] | null> {
+export async function listMessages(offerId: string, userId: string, markRead = false): Promise<ChatMessage[] | null> {
   await ensureDatabaseSchema();
   if (!await canUseConversation(offerId, userId)) return null;
   const sql = sqlClient();
@@ -734,7 +741,7 @@ export async function listMessages(offerId: string, userId: string): Promise<Cha
     ORDER BY message.created_at ASC
     LIMIT 500
   `;
-  if (rows.length) {
+  if (markRead && rows.length) {
     const readThrough = rows[rows.length - 1].created_at;
     await sql`
       INSERT INTO vanscout_conversation_reads (offer_id, user_id, read_at)
@@ -753,7 +760,7 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
   await ensureDatabaseSchema();
   const sql = sqlClient();
   const access = await sql`
-    SELECT offer.carrier_id, tr.requester_id, offer.price_cents, offer.status
+    SELECT offer.carrier_id, tr.requester_id, offer.price_cents, offer.vat_included, offer.status
     FROM vanscout_transport_offers offer
     JOIN vanscout_transport_requests tr ON tr.id = offer.transport_request_id
     WHERE offer.id = ${offerId} AND offer.status IN ('pending', 'confirmed')
@@ -778,7 +785,7 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
     }
   }
   if (String(access[0].carrier_id) === senderId && String(access[0].status) === "pending") {
-    await requireCarrierCredits(senderId, Number(access[0].price_cents));
+    await requireCarrierCredits(senderId, Number(access[0].price_cents), Boolean(access[0].vat_included));
   }
   const encryptedBody = encryptMessage(body);
   const rows = await sql`

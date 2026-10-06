@@ -12,7 +12,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await authenticatedUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await context.params;
-  const messages = await listMessages(id, user.id);
+  const markRead = new URL(request.url).searchParams.get("markRead") === "true";
+  const messages = await listMessages(id, user.id, markRead);
   if (!messages) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ messages, userId: user.id }, { headers: { "Cache-Control": "no-store" } });
 }
