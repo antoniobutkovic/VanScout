@@ -18,7 +18,7 @@ function digitsIn(value: string) {
 }
 
 function looksLikeDate(value: string) {
-  return /^(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}[./-]\d{1,2}[./-]\d{1,2})$/.test(value.trim());
+  return /^(?:\d{1,2}[./\-\s]\d{1,2}[./\-\s]\d{2,4}|\d{4}[./\-\s]\d{1,2}[./\-\s]\d{1,2})$/.test(value.trim());
 }
 
 function hasPhoneNumber(value: string) {
@@ -39,6 +39,18 @@ export function hasRestrictedContactDetails(value: string) {
   return hasPhoneNumber(text)
     || /[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+/i.test(text)
     || /(?:https?:\/\/|www\.|(?:wa\.me|t\.me)\/)[^\s]+/i.test(text);
+}
+
+/**
+ * Catches a phone number deliberately split between consecutive messages.
+ * Every part must be numeric-only so ordinary prose in separate messages is
+ * not joined into a false phone-number match.
+ */
+export function hasDistributedPhoneNumber(parts: string[]) {
+  if (parts.length < 2) return false;
+  const normalisedParts = parts.map(normaliseForContactDetection);
+  if (!normalisedParts.every(part => /^[+()\d\s./-]+$/.test(part) && /\d/.test(part))) return false;
+  return hasPhoneNumber(normalisedParts.join(" "));
 }
 
 export class RestrictedContactDetailsError extends Error {
