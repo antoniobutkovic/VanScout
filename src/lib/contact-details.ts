@@ -13,6 +13,30 @@ function normaliseForContactDetection(value: string) {
     .replace(/[\u200B-\u200D\uFEFF]/g, "");
 }
 
+const DIGIT_WORDS: Record<string, string> = {
+  zero: "0", oh: "0", nought: "0", nil: "0", nula: "0",
+  one: "1", jedan: "1", jedna: "1", jedno: "1",
+  two: "2", dva: "2", dvije: "2",
+  three: "3", tri: "3",
+  four: "4", cetiri: "4",
+  five: "5", pet: "5",
+  six: "6", sest: "6",
+  seven: "7", sedam: "7",
+  eight: "8", osam: "8",
+  nine: "9", devet: "9",
+};
+
+function digitForWord(word: string) {
+  const plainWord = word.toLocaleLowerCase("en-US").normalize("NFD").replace(/\p{Diacritic}/gu, "");
+  if (DIGIT_WORDS[plainWord]) return DIGIT_WORDS[plainWord];
+  // Deliberate abbreviations such as "sevent" should not bypass the rule.
+  return plainWord.startsWith("sevent") ? "7" : null;
+}
+
+function normalisePhoneWords(value: string) {
+  return normaliseForContactDetection(value).replace(/\p{L}+/gu, word => digitForWord(word) || word);
+}
+
 function digitsIn(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -22,7 +46,7 @@ function looksLikeDate(value: string) {
 }
 
 function hasPhoneNumber(value: string) {
-  const text = normaliseForContactDetection(value);
+  const text = normalisePhoneWords(value);
   if (/(?:^|[^\d])\d{7,15}(?!\d)/.test(text)) return true;
 
   // Treat separators as cosmetic. People can otherwise evade a conventional
@@ -48,7 +72,7 @@ export function hasRestrictedContactDetails(value: string) {
  */
 export function hasDistributedPhoneNumber(parts: string[]) {
   if (parts.length < 2) return false;
-  const normalisedParts = parts.map(normaliseForContactDetection);
+  const normalisedParts = parts.map(normalisePhoneWords);
   if (!normalisedParts.every(part => /^[+()\d\s./-]+$/.test(part) && /\d/.test(part))) return false;
   return hasPhoneNumber(normalisedParts.join(" "));
 }
