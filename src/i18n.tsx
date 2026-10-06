@@ -8,6 +8,10 @@ type TranslationParams = Record<string, string | number>;
 
 const CROATIAN: Record<string, string> = {
   Language: "Jezik",
+  Navigation: "Navigacija",
+  "Close navigation": "Zatvori navigaciju",
+  "Back to messages": "Natrag na poruke",
+  "Unread messages": "Nepročitane poruke",
   English: "Engleski",
   Croatian: "Hrvatski",
   "For requesters": "Za korisnike",
