@@ -5,6 +5,7 @@ describe("contact detail restriction", () => {
   it.each([
     "Call me on +385 91 555 2400",
     "My number is 091 555 2400",
+    "097 655109 7",
     "Reach me at 00385 (91) 555-2400",
     "Call 0912345678",
     "Call \u0660\u0669\u0661 \u0665\u0665\u0665 \u0662\u0664\u0660\u0660",
