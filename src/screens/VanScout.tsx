@@ -353,11 +353,46 @@ function useHasMessages(kind?: "customer" | "carrier") {
   return hasMessages;
 }
 
+function useMobileLayout() {
+  const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 680px)").matches);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 680px)");
+    const update = () => setMobile(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return mobile;
+}
+
 function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: string }) {
   const { t } = useLanguage();
   const hasMessages = useHasMessages(kind);
-  const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]];
-  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={`mobile-nav-link ${active === "profile" ? "active" : ""}`} to="/customer/profile">{t("Profile")}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
+  const mobile = useMobileLayout();
+  const drawer = useRef<HTMLDialogElement | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const location = useLocation();
+  const closeDrawer = () => drawer.current?.close();
+  useEffect(() => { drawer.current?.close(); }, [location.pathname, location.search, mobile]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [drawerOpen]);
+  const links = kind === "carrier"
+    ? [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]]
+    : [["requests", "Requests", "/customer"], ["messages", "Messages", "/customer/messages"], ["profile", "Profile", "/customer/profile"]];
+  const navigation = (inDrawer = false) => <nav aria-label={t("Navigation")}>{links.map(([key, label, href]) => <Link className={`${active === key ? "active" : ""} ${!inDrawer && kind === "customer" && key === "profile" ? "mobile-nav-link" : ""}`.trim()} aria-current={active === key ? "page" : undefined} key={key} to={href} onClick={inDrawer ? closeDrawer : undefined}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-label={t("Unread messages")} />}</Link>)}</nav>;
+  return <header className={`topbar ${kind ? "app-topbar" : ""}`}>
+    <Mark />{kind && navigation()}<HeaderActions kind={kind} />
+    {kind && <>
+      <button type="button" className="mobile-menu-toggle" aria-label={t("Open navigation")} aria-expanded={drawerOpen} aria-controls="mobile-navigation" onClick={() => { drawer.current?.showModal(); setDrawerOpen(true); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>{hasMessages && <span className="menu-unread-indicator" />}</button>
+      <dialog ref={drawer} id="mobile-navigation" className="mobile-nav-drawer" aria-labelledby="mobile-navigation-heading" onClose={() => setDrawerOpen(false)} onClick={event => { if (event.target === event.currentTarget) closeDrawer(); }}>
+        <section><header><h2 id="mobile-navigation-heading">{t("Navigation")}</h2><button type="button" className="drawer-close" aria-label={t("Close navigation")} autoFocus onClick={closeDrawer}>×</button></header>{navigation(true)}<HeaderActions kind={kind} /></section>
+      </dialog>
+    </>}
+  </header>;
 }
 function Footer() { const { t } = useLanguage(); return <footer className="footer"><div className="footer-brand"><Mark /><strong>Contact</strong><a href="mailto:info@van-scout.com">info@van-scout.com</a></div><div className="footer-legal"><strong>{t("Legal information")}</strong><Link to="/politika-privatnosti">{t("Privacy policy")}</Link><Link to="/politika-o-kolacicima">{t("Cookie policy")}</Link><Link to="/uvjeti-koristenja">{t("Terms of use")}</Link><Link to="/impressum">{t("Impressum")}</Link></div><small className="footer-copyright">{t("© 2026 VanScout. All rights reserved.")}</small></footer>; }
 function ItemImage({ type = "bed", label }: { type?: "bed" | "photo"; label?: string }) { const { t } = useLanguage(); return <div className={`item-image ${type}`}><span>{label || (type === "bed" ? <>{t("Bed")}<br />{t("slats")}</> : t("Photo"))}</span></div>; }
@@ -1249,9 +1284,19 @@ function Accepted({ onTracking, onReview }: { onTracking: () => void; onReview: 
 function Messages({ onAccept }: { onAccept: () => void }) { const { t } = useLanguage(); const [note, setNote] = useState(""); const [sent, setSent] = useState<string[]>([]); return <section className="messages-page"><header><p className="eyebrow">{t("Keep it in one place")}</p><h1>{t("Messages")}</h1></header><div className="messages"><aside><button className="conversation selected"><Avatar /><span><b>Mario M.</b><small>{t("Sounds good - 17:00 works.")}</small></span><i>2m</i></button><button className="conversation"><Avatar offer={OFFERS[1]} /><span><b>Luka P.</b><small>{t("I can do tomorrow morning.")}</small></span><i>1h</i></button></aside><article><header><div><Avatar /><span><b>Mario M.</b><small>★ 4.9 · Renault Master</small></span></div><b className="offer-tag">{t("Offer: €32")}</b></header><div className="chat-context"><span>{t("Pickup: Today, 17:00–19:00")}</span><button className="button moss short" onClick={onAccept}>{t("Accept offer")}</button></div><div className="thread"><p className="bubble theirs">{t("Hi Ana, I’m already collecting an order near IKEA this afternoon. I can pick up the bed slats between 17:00–19:00.")}</p><p className="bubble mine">{t("Great, that works. It’s ground floor pickup and the slats are already packed.")}</p><p className="contact-note">{t("Contact information can be shared after an offer is accepted.")}</p>{sent.map(x => <p className="bubble mine" key={x}>{x}</p>)}</div><form noValidate onSubmit={event => { event.preventDefault(); if (note.trim()) { setSent([...sent, note.trim()]); setNote(""); } }}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form></article></div></section>; }
 function LiveMessages() {
   const { language, t } = useLanguage();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mobile = useMobileLayout();
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedId, setSelectedId] = useState(() => searchParams.get("offer") || "");
+  const [desktopSelectedId, setDesktopSelectedId] = useState("");
+  const requestedId = searchParams.get("offer") || "";
+  const requestedConversation = conversations.find(conversation => conversation.offerId === requestedId);
+  const selectedId = requestedConversation?.offerId || (mobile ? "" : desktopSelectedId);
+  const openConversation = (offerId: string) => {
+    setSearchParams(current => { const next = new URLSearchParams(current); next.set("offer", offerId); return next; });
+  };
+  const backToConversations = () => {
+    setSearchParams(current => { const next = new URLSearchParams(current); next.delete("offer"); return next; }, { replace: true });
+  };
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userId, setUserId] = useState("");
   const [note, setNote] = useState("");
@@ -1281,7 +1326,7 @@ function LiveMessages() {
       if (!response.ok) throw new Error(payload.error || t("Unable to load messages"));
       const next = payload.conversations || [];
       setConversations(next);
-      setSelectedId(current => current && next.some(item => item.offerId === current) ? current : next[0]?.offerId || "");
+      setDesktopSelectedId(current => next.some(conversation => conversation.offerId === current) ? current : next[0]?.offerId || "");
       setError("");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t("Unable to load messages"));
@@ -1295,6 +1340,7 @@ function LiveMessages() {
       const response = await fetch(`/api/conversations/${offerId}/messages${markRead ? "?markRead=true" : ""}`, { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
       const payload = await response.json() as { messages?: ChatMessage[]; userId?: string; error?: string };
       if (!response.ok) throw new Error(payload.error || t("Unable to load messages"));
+      if (selectedIdRef.current !== offerId) return;
       setMessages(payload.messages || []);
       setUserId(payload.userId || "");
       setError("");
@@ -1309,8 +1355,9 @@ function LiveMessages() {
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
-    if (!selectedId) setMessages([]);
-    else void loadMessages(selectedId);
+    setMessages([]);
+    setNote("");
+    if (selectedId) void loadMessages(selectedId);
   }, [selectedId, loadMessages]);
 
   useEffect(() => {
@@ -1464,13 +1511,13 @@ function LiveMessages() {
           : selected?.selectedByCustomer ? t("Customer selected you") : t("Agree when the transport details are settled");
   const canAgree = !needsCarrierCredits && selected?.status === "pending" && (selected.role === "requester" ? !selected.selectedByCustomer : !selected.carrierAgreed);
 
-  return <section className="messages-page">
+  return <section className={`messages-page live-messages-page ${selected ? "chat-open" : ""}`}>
     <header><h1>{t("Messages")}</h1></header>
     {error && <p className="transport-list-message error">{error}</p>}
-    {!conversations.length ? <div className="empty-transports"><h2>{t("No conversations yet")}</h2><p>{t("A conversation opens as soon as a carrier sends an offer.")}</p></div> : <div className="messages">
-      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => setSelectedId(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span></button>)}</aside>
+    {!conversations.length ? <div className="empty-transports"><h2>{t("No conversations yet")}</h2><p>{t("A conversation opens as soon as a carrier sends an offer.")}</p></div> : <div className="messages live-messages">
+      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => openConversation(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span>{conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</button>)}</aside>
       {selected && <article>
-        <header><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
+        <header><button type="button" className="mobile-chat-back" aria-label={t("Back to messages")} onClick={backToConversations}><BackIcon /></button><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
         <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <div className="contact-note contact-revealed deal-contact"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
         <div className="thread" ref={threadRef}>{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}</div>
         {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <>{selected.status === "pending" && <p className="contact-note compose-contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p>}<form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} onFocus={() => void loadMessages(selected.offerId, true)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form></>}
