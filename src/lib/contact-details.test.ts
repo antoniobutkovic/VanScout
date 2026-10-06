@@ -9,6 +9,8 @@ describe("contact detail restriction", () => {
     "Reach me at 00385 (91) 555-2400",
     "Call 0912345678",
     "Call \u0660\u0669\u0661 \u0665\u0665\u0665 \u0662\u0664\u0660\u0660",
+    "zero nine sevent six five five one zero nine",
+    "nula devet sedam šest pet pet jedan nula devet",
     "me@example.com",
     "https://example.com/contact",
     "www.example.com",
@@ -28,6 +30,10 @@ describe("contact detail restriction", () => {
 
   it("blocks a phone number split between consecutive messages", () => {
     expect(hasDistributedPhoneNumber(["097", "655109", "7"])).toBe(true);
+  });
+
+  it("blocks a number spelled across consecutive messages", () => {
+    expect(hasDistributedPhoneNumber(["zero nine seven", "six five five", "one zero nine"])).toBe(true);
   });
 
   it("allows date fragments split between consecutive messages", () => {
