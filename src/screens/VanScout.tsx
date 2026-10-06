@@ -31,6 +31,7 @@ const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Review"
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TRANSPORT_PAGE_SIZE = 20;
 const ITEM_NAME_MAX_LENGTH = 200;
+const MAX_PICKUP_RADIUS_KM = 3_000;
 
 function Arrow() { return null; }
 function BackIcon() { return <svg className="back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>; }
@@ -608,6 +609,7 @@ export function Registration() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordConfirmationError, setPasswordConfirmationError] = useState("");
   const [authError, setAuthError] = useState("");
+  const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [emailCode, setEmailCode] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
@@ -615,7 +617,6 @@ export function Registration() {
   const [localNumber, setLocalNumber] = useState("");
   const [pendingPhoneNumber, setPendingPhoneNumber] = useState("");
   const [phoneError, setPhoneError] = useState("");
-  const [message, setMessage] = useState("");
   const [googleRegistrationToken, setGoogleRegistrationToken] = useState("");
   const emailResendCooldown = useEmailResendCooldown(Boolean(verificationEmail));
   const confirmationResult = useRef<ConfirmationResult | null>(null);
@@ -632,7 +633,6 @@ export function Registration() {
     if (verificationEmail) setEmail(verificationEmail);
     setGoogleRegistrationToken("");
     setAuthError("");
-    setMessage("");
   }, [requestedMode, verificationEmail]);
 
   const syncPhotosAndNavigate = async (token: string, user: AuthenticatedUser) => {
@@ -1200,10 +1200,10 @@ function ReviewTransport({ request, offer }: { request: TransportRequest; offer:
 function CarrierReviews({ profile }: { profile: CarrierProfileData }) {
   const { language, t } = useLanguage();
   const ratingSummary = profile.ratingAverage === null
-    ? t("No ratings yet")
+    ? null
     : `★ ${profile.ratingAverage.toFixed(1)} · ${profile.ratingCount} ${t("ratings")}`;
   return <section className="carrier-reviews"><details>
-    <summary><span><b>{t("Customer reviews")}</b><small>{ratingSummary}</small></span><span className="review-disclosure" aria-hidden="true">⌄</span></summary>
+    <summary><span><b>{t("Customer reviews")}</b>{ratingSummary && <small>{ratingSummary}</small>}</span><span className="review-disclosure" aria-hidden="true" /></summary>
     <div className="review-list">{profile.reviews.length ? profile.reviews.map(review => <blockquote key={review.id}><b>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</b>{review.feedback && <span>“{review.feedback}”</span>}<footer>— {review.customerName}, {new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { month: "short", year: "numeric" }).format(new Date(review.createdAt))}</footer></blockquote>) : <p>{t("No customer reviews yet")}</p>}</div>
   </details></section>;
 }
@@ -1447,13 +1447,18 @@ function LiveMessages() {
   </section>;
 }
 function DeleteAccountControl() {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const nav = useNavigate();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const erase = async () => {
-    const confirmation = window.prompt(t("Type DELETE MY ACCOUNT to permanently delete your account and associated data."));
-    if (confirmation !== "DELETE MY ACCOUNT" || !window.confirm(t("This cannot be undone. Continue?"))) return;
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const requiredConfirmation = language === "hr" ? "OBRISI" : "DELETE";
+  const openDialog = () => { setConfirmation(""); setError(""); setDialogOpen(true); };
+  const closeDialog = () => { if (!busy) setDialogOpen(false); };
+  const erase = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (confirmation !== requiredConfirmation) return;
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/privacy/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmation }) });
@@ -1462,7 +1467,7 @@ function DeleteAccountControl() {
       nav("/", { replace: true });
     } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : t("Unable to delete your account")); setBusy(false); }
   };
-  return <div className="account-delete-control"><button type="button" disabled={busy} onClick={() => void erase()}>{busy ? t("Deleting…") : t("Delete my account")}</button>{error && <p className="auth-message error" role="alert">{error}</p>}</div>;
+  return <div className="account-delete-control"><button type="button" disabled={busy} onClick={openDialog}>{t("Delete my account")}</button>{dialogOpen && <div className="account-delete-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}><section className="account-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-account-title"><button type="button" className="pickup-area-close account-delete-dialog-close" aria-label={t("Close")} disabled={busy} onClick={closeDialog}>×</button><h2 id="delete-account-title">{t("Delete account")}</h2><p>{t("Type {word} to permanently delete your account and associated data.", { word: requiredConfirmation })}</p><form onSubmit={erase}><input autoFocus value={confirmation} onChange={event => setConfirmation(event.target.value)} aria-label={requiredConfirmation} autoComplete="off" spellCheck={false} /><div><button type="button" className="quiet-link" disabled={busy} onClick={closeDialog}>{t("Cancel")}</button><button type="submit" className="button danger short" disabled={busy || confirmation !== requiredConfirmation}>{busy ? t("Deleting…") : t("Delete account")}</button></div>{error && <p className="auth-message error" role="alert">{error}</p>}</form></section></div>}</div>;
 }
 
 function CustomerProfile() {
@@ -1543,7 +1548,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
         if (!response.ok || !payload.preferences) return;
         setDistanceFilter(payload.preferences.distanceKm);
         setPickupArea(payload.preferences.pickupArea);
-        setPickupRadius(payload.preferences.pickupRadiusKm);
+        setPickupRadius(Math.min(payload.preferences.pickupRadiusKm, MAX_PICKUP_RADIUS_KM));
       })
       .finally(() => setPreferencesLoaded(true));
   }, []);
@@ -1601,7 +1606,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
         <button type="button" className="pickup-area-trigger" onClick={openPickupAreaDialog} aria-expanded={isPickupAreaOpen} aria-label={t("Pickup area")}><b>{pickupAreaSummary}</b></button>
       </div>
     </div>
-    {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Pickup area")}><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: draftPickupRadius })}</strong></span><input type="range" min="5" max="5000" step="5" value={draftPickupRadius} onChange={event => setDraftPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: draftPickupRadius })} /></label><button type="button" className="pickup-area-close pickup-area-radius-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={draftPickupArea} onChange={setDraftPickupArea} showSearch={false} showCurrentLocation={false} radiusKm={draftPickupRadius} /><div className="pickup-area-actions">{draftPickupArea && <button type="button" className="quiet-link" onClick={clearPickupArea}>{t("Clear location")}</button>}<button type="button" className="button moss pickup-area-apply" onClick={applyPickupArea}>{t("Apply")}</button></div></section></div>}
+    {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Pickup area")}><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: draftPickupRadius })}</strong></span><input type="range" min="5" max={MAX_PICKUP_RADIUS_KM} step="5" value={draftPickupRadius} onChange={event => setDraftPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: draftPickupRadius })} /></label><button type="button" className="pickup-area-close pickup-area-radius-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={draftPickupArea} onChange={setDraftPickupArea} showSearch={false} showCurrentLocation={false} radiusKm={draftPickupRadius} /><div className="pickup-area-actions">{draftPickupArea && <button type="button" className="quiet-link" onClick={clearPickupArea}>{t("Clear location")}</button>}<button type="button" className="button moss pickup-area-apply" onClick={applyPickupArea}>{t("Apply")}</button></div></section></div>}
     {loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}
     {hasMore && <button type="button" className="button dark load-more-transports" disabled={loadingMore} onClick={loadMore}>{loadingMore ? t("Loading more…") : t("Load more")}</button>}
   </section>;
@@ -1690,7 +1695,6 @@ function CarrierProfileEditor() {
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
@@ -1709,7 +1713,6 @@ function CarrierProfileEditor() {
     const validFiles = selectedFiles.filter(file => file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024);
     const imagesToAdd = validFiles.slice(0, remainingImageSlots);
     if (imagesToAdd.length) setFiles(current => [...current, ...imagesToAdd]);
-    setMessage("");
     if (validFiles.length !== selectedFiles.length) {
       setError(t("Choose image files up to 10 MB each"));
     } else if (validFiles.length > remainingImageSlots) {
@@ -1723,7 +1726,6 @@ function CarrierProfileEditor() {
     const token = getAuthToken();
     if (!token) return;
     if (!companyName.trim()) {
-      setMessage("");
       setError(t("Enter your company name"));
       return;
     }
@@ -1744,10 +1746,30 @@ function CarrierProfileEditor() {
     setImageIds(payload.profile.imageIds);
     setFiles([]);
     setError("");
-    setMessage(t("Profile saved"));
   };
   const initials = profile?.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="carrier-profile real-carrier-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.carrierName || t("Your profile")}</h1><div className="profile-stats"><span>{profile?.completedTransports || 0} {t("completed transports")}</span><span>{new Intl.NumberFormat().format(profile?.kilometresTravelled || 0)} km {t("travelled")}</span></div><DeleteAccountControl /></div></div><form noValidate onSubmit={save}><label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /><span className="field-hint">{t("This name appears on your offers and in customer chats.")}</span></label><label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /><span className="field-hint">{t("A short, specific introduction helps customers choose with confidence.")}</span></label><div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div>{remainingImageSlots > 0 && <label className="business-image-picker"><input type="file" accept="image/*" multiple onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span>＋ {t("Add image")}</span></label>}</div>{imageCount > 0 && <div className="carrier-image-grid">{imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); setMessage(""); }}>×</button></figure>)}{files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); setMessage(""); }}>×</button></figure>)}</div>}{error && <p className="transport-list-message error">{error}</p>}{message && <p className="auth-message success">{message}</p>}<button className="button moss" type="submit">{t("Save profile")}</button></form>{profile && <CarrierReviews profile={profile} />}<VehicleManager vehicles={profile?.vehicles || []} onChange={vehicles => setProfile(current => current ? { ...current, vehicles } : current)} /></section>;
+  const profileChanged = profile !== null && (companyName.trim() !== profile.companyName || bio.trim() !== profile.bio || profileImage !== null || files.length > 0 || imageIds.join(",") !== profile.imageIds.join(","));
+  return <section className="carrier-profile real-carrier-profile">
+    <div className="profile-head">
+      <label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label>
+      <div><h1>{profile?.carrierName || t("Your profile")}</h1><div className="profile-stats"><span>{profile?.completedTransports || 0} {t("completed transports")}</span><span>{new Intl.NumberFormat().format(profile?.kilometresTravelled || 0)} km {t("travelled")}</span></div></div>
+    </div>
+    <form id="carrier-profile-form" noValidate onSubmit={save}>
+      <label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /></label>
+      <label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /></label>
+      <div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div></div>
+      <div className="carrier-image-grid">
+        {imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); }}>×</button></figure>)}
+        {files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); }}>×</button></figure>)}
+        {Array.from({ length: remainingImageSlots }, (_, index) => <label className="carrier-image-placeholder" key={`placeholder-${index}`} title={t("Add image")}><input type="file" accept="image/*" multiple aria-label={t("Add image")} onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span aria-hidden="true">＋</span></label>)}
+      </div>
+      {error && <p className="transport-list-message error">{error}</p>}
+    </form>
+    {profileChanged && <div className="profile-save-float"><button className="button moss" type="submit" form="carrier-profile-form">{t("Save profile")}</button></div>}
+    {profile && <CarrierReviews profile={profile} />}
+    <VehicleManager vehicles={profile?.vehicles || []} onChange={vehicles => setProfile(current => current ? { ...current, vehicles } : current)} />
+    <DeleteAccountControl />
+  </section>;
 }
 
 function VehicleManager({ vehicles, onChange }: { vehicles: CarrierVehicle[]; onChange: (vehicles: CarrierVehicle[]) => void }) {
@@ -1782,7 +1804,7 @@ function VehicleManager({ vehicles, onChange }: { vehicles: CarrierVehicle[]; on
   return <section className="vehicle-manager"><header><div><h2>{t("Vehicles")}</h2><span>{t("Add the vehicle data customers see on your profile")}</span></div><button type="button" className="button dark short" onClick={add}>{t("Add vehicle")}</button></header>
     {vehicles.length ? vehicles.map(vehicle => <article key={vehicle.id}><div>▰</div><div><b>{vehicle.name}</b><small>{vehicle.sizeDescription}</small></div><button type="button" className="quiet-link" onClick={() => edit(vehicle)}>{t("Edit")}</button><button type="button" className="quiet-link danger" onClick={() => void remove(vehicle.id)}>{t("Remove")}</button></article>) : <p className="vehicle-empty-state">{t("No vehicles added yet")}</p>}
     {error && !dialogOpen && <p className="transport-list-message error">{error}</p>}
-    {dialogOpen && <div className="vehicle-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}><section className="vehicle-dialog" role="dialog" aria-modal="true" aria-labelledby="vehicle-dialog-title"><button type="button" className="close" aria-label={t("Close")} onClick={closeDialog}>×</button><form onSubmit={save}><h3 id="vehicle-dialog-title">{editingId ? t("Edit vehicle") : t("Add vehicle")}</h3><p>{t("Vehicle details are shown on your public carrier profile.")}</p><label>{t("Vehicle name")}<input autoFocus value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} maxLength={120} required placeholder={t("e.g. Renault Master")} /></label><label>{t("Size and capacity")}<input value={draft.sizeDescription} onChange={event => setDraft(current => ({ ...current, sizeDescription: event.target.value }))} maxLength={250} required placeholder={t("e.g. Large van · 3.2m cargo length · 1,350kg payload")} /></label>{error && <p className="transport-list-message error">{error}</p>}<div><button className="button moss short" disabled={saving}>{saving ? t("Saving…") : t("Save vehicle")}</button><button type="button" className="quiet-link" disabled={saving} onClick={closeDialog}>{t("Cancel")}</button></div></form></section></div>}
+    {dialogOpen && <div className="vehicle-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}><section className="vehicle-dialog" role="dialog" aria-modal="true" aria-labelledby="vehicle-dialog-title"><button type="button" className="pickup-area-close vehicle-dialog-close" aria-label={t("Close")} onClick={closeDialog}>×</button><form onSubmit={save}><h3 id="vehicle-dialog-title">{editingId ? t("Edit vehicle") : t("Add vehicle")}</h3><label>{t("Vehicle name")}<input autoFocus value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} maxLength={120} required placeholder={t("e.g. Renault Master")} /></label><label>{t("Size and capacity")}<input value={draft.sizeDescription} onChange={event => setDraft(current => ({ ...current, sizeDescription: event.target.value }))} maxLength={250} required placeholder={t("e.g. Large van · 3.2m cargo length · 1,350kg payload")} /></label>{error && <p className="transport-list-message error">{error}</p>}<div className="vehicle-dialog-actions"><button type="button" className="quiet-link" disabled={saving} onClick={closeDialog}>{t("Cancel")}</button><button className="button moss short" disabled={saving}>{saving ? t("Saving…") : t("Save vehicle")}</button></div></form></section></div>}
   </section>;
 }
 function JobDetail({ onBack, onOffer }: { onBack: () => void; onOffer: () => void }) { const { t } = useLanguage(); return <section className="job-detail"><button className="back" onClick={onBack}>← {t("Available transports")}</button><header><div><p className="eyebrow">{t("Furniture")} · {t("Flexible")}</p><h1>{t("Bed slats")}</h1><p>IKEA Zagreb <i>→</i> Trešnjevka</p></div><b>12 km</b></header><div className="job-layout"><div><div className="detail-map"><RouteLine /><span>IKEA Zagreb</span><span>Trešnjevka</span></div><section><h2>{t("What you’re moving")}</h2><p>{t("Bed slats, already packed. No loading help required.")}</p><div className="photo-row"><ItemImage type="photo" /><ItemImage type="photo" /></div></section><section className="info-split"><div><span>{t("Pickup")}</span><b>{t("Flexible · Ground floor")}</b></div><div><span>{t("Delivery")}</span><b>{t("Trešnjevka · Elevator available")}</b></div></section></div><aside><p className="eyebrow">{t("Interested")}</p><h2>{t("Make a clear offer.")}</h2><p>{t("Tell the customer your price and when you can do it.")}</p><button className="button moss full" onClick={onOffer}>{t("Make an offer")} <Arrow /></button></aside></div><button className="button moss mobile-sticky" onClick={onOffer}>{t("Make an offer")}</button></section>; }
