@@ -161,12 +161,13 @@ async function ensureSchema() {
           pickup_latitude DOUBLE PRECISION,
           pickup_longitude DOUBLE PRECISION,
           pickup_city TEXT,
-          pickup_radius_km INTEGER NOT NULL DEFAULT 25 CHECK (pickup_radius_km BETWEEN 5 AND 5000),
+          pickup_radius_km INTEGER NOT NULL DEFAULT 25 CHECK (pickup_radius_km BETWEEN 5 AND 3000),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
-      // Existing databases retain the old 500 km constraint after CREATE TABLE
-      // IF NOT EXISTS, so update the check constraint idempotently as well.
+      // Existing databases retain the old 5,000 km constraint after CREATE TABLE
+      // IF NOT EXISTS. Cap saved values before tightening the check constraint.
+      await sql`UPDATE vanscout_carrier_search_preferences SET pickup_radius_km = 3000 WHERE pickup_radius_km > 3000`;
       await sql`
         DO $$
         BEGIN
@@ -174,7 +175,7 @@ async function ensureSchema() {
             DROP CONSTRAINT IF EXISTS vanscout_carrier_search_preferences_pickup_radius_km_check;
           ALTER TABLE vanscout_carrier_search_preferences
             ADD CONSTRAINT vanscout_carrier_search_preferences_pickup_radius_km_check
-            CHECK (pickup_radius_km BETWEEN 5 AND 5000);
+            CHECK (pickup_radius_km BETWEEN 5 AND 3000);
         END $$;
       `;
       await sql`

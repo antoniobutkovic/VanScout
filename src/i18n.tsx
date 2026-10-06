@@ -599,12 +599,12 @@ const CROATIAN: Record<string, string> = {
   "Privacy and your data": "Privatnost i vaši podaci",
   "Download a copy of your VanScout data or permanently delete your account.": "Preuzmite kopiju svojih VanScout podataka ili trajno izbrišite račun.",
   "Download my data": "Preuzmi moje podatke",
-  "Delete my account": "Izbriši moj račun",
+  "Delete my account": "Izbriši račun",
+  "Delete account": "Izbriši račun",
+  "Type {word} to permanently delete your account and associated data.": "Upišite {word} kako biste trajno izbrisali račun i povezane podatke.",
   "Deleting…": "Brisanje…",
   "Unable to export your data": "Nije moguće izvesti vaše podatke",
   "Unable to delete your account": "Nije moguće izbrisati vaš račun",
-  "Type DELETE MY ACCOUNT to permanently delete your account and associated data.": "Upišite DELETE MY ACCOUNT kako biste trajno izbrisali račun i povezane podatke.",
-  "This cannot be undone. Continue?": "Ovu radnju nije moguće poništiti. Nastaviti?",
   "Loading profile…": "Učitavanje profila…",
 };
 

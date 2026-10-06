@@ -49,7 +49,7 @@ p { line-height: 1.5; color: var(--muted); }
 .picker-menu { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; right: 0; max-height: 280px; overflow-y: auto; display: grid; gap: 3px; padding: 6px; border: 1px solid var(--stone); background: var(--white); box-shadow: 0 8px 20px rgba(28,33,27,.12); }
 .picker-option { width: 100%; min-height: 44px; border: 0; background: transparent; padding: 11px 13px; color: var(--ink); text-align: left; font-size: 14px; font-weight: 700; }
 .picker-option:hover, .picker-option.selected { background: var(--moss-soft); }
-.language-picker { display: inline-flex; align-items: center; width: auto; margin: 0; order: 99; }
+.language-picker { display: none; }
 .language-picker .picker-trigger { width: 35px; min-height: 35px; padding: 0; justify-content: center; font-size: 16px; line-height: 1; }
 .language-picker .picker-chevron { display: none; }
 .language-picker .picker-menu { left: auto; right: 0; width: 35px; }
@@ -708,17 +708,18 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .real-carrier-profile form > label { display: grid; gap: 8px; font-size: 12px; font-weight: 800; }
 .real-carrier-profile input:not([type="file"]), .real-carrier-profile textarea { padding: 13px 14px; background: var(--white); }
 .real-carrier-profile textarea { min-height: 140px; resize: vertical; }
+.profile-save-float { position: fixed; right: clamp(18px, 4vw, 40px); bottom: clamp(18px, 4vw, 32px); z-index: 40; }
 .business-images-field { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
 .business-images-heading { display: grid; gap: 6px; font-size: 12px; }
-.business-image-picker { position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 18px; border: 1px solid var(--moss); border-radius: 999px; color: var(--moss); cursor: pointer; font-size: 12px; font-weight: 800; white-space: nowrap; }
-.business-image-picker:hover { color: var(--paper); background: var(--moss); }
-.business-image-picker:focus-within { outline: 3px solid var(--clay); outline-offset: 2px; }
-.business-image-picker input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .carrier-image-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .carrier-image-grid figure { position: relative; margin: 0; overflow: hidden; background: var(--mist); }
 .carrier-image-grid figure > img, .carrier-image-grid figure > span { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--mist); }
 .carrier-image-grid figure > button { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; color: var(--paper); background: rgba(22, 27, 21, .82); box-shadow: 0 2px 8px rgba(0, 0, 0, .18); cursor: pointer; font-size: 21px; line-height: 1; }
 .carrier-image-grid figure > button:hover { background: var(--red); }
+.carrier-image-placeholder { display: grid; place-items: center; aspect-ratio: 4 / 3; border: 1px dashed var(--stone); background: var(--mist); color: var(--moss); cursor: pointer; font-size: 30px; }
+.carrier-image-placeholder:hover { border-color: var(--moss); background: var(--moss-soft); }
+.carrier-image-placeholder:focus-within { outline: 3px solid var(--clay); outline-offset: 2px; }
+.carrier-image-placeholder input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .carrier-profile section { border-top: 1px solid var(--stone); padding-top: 20px; margin-top: 30px; }
 .carrier-profile section > header { display: flex; justify-content: space-between; align-items: center; }
 .carrier-profile section > header h2 { margin: 0; }
@@ -739,8 +740,8 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .carrier-reviews summary > span:first-child { display: grid; gap: 4px; }
 .carrier-reviews summary b { font-size: 17px; }
 .carrier-reviews summary small { color: var(--muted); font-size: 12px; }
-.review-disclosure { color: var(--moss); font-size: 22px; line-height: 1; transition: transform .2s ease; }
-.carrier-reviews details[open] .review-disclosure { transform: rotate(180deg); }
+.review-disclosure { width: 10px; height: 10px; flex: 0 0 auto; margin-right: 4px; border-right: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); transform: rotate(45deg); transition: transform .2s ease; }
+.carrier-reviews details[open] .review-disclosure { transform: rotate(225deg); }
 .review-list { display: grid; gap: 10px; padding-bottom: 20px; }
 .review-list blockquote { display: grid; gap: 7px; margin: 0; padding: 15px; background: var(--sage); }
 .review-list blockquote > b { color: var(--clay); letter-spacing: .08em; }
@@ -757,14 +758,13 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .vehicle-manager > article button { font-size: 12px; }
 .vehicle-empty-state { margin: 0; padding: 20px; border: 1px dashed var(--stone); color: var(--muted); font-size: 13px; }
 .vehicle-dialog-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 24px; overflow-y: auto; background: rgba(22,30,19,.42); }
-.vehicle-dialog { position: relative; width: min(100%, 620px); padding: clamp(28px, 5vw, 46px); background: var(--paper); box-shadow: 0 20px 60px rgba(22,30,19,.24); }
-.vehicle-dialog .close { position: absolute; top: 15px; right: 18px; }
+.carrier-profile .vehicle-dialog { position: relative; width: min(100%, 620px); margin-top: 0; padding: clamp(28px, 5vw, 46px); border-top: 0; background: var(--paper); box-shadow: 0 20px 60px rgba(22,30,19,.24); }
+.vehicle-dialog-close { position: absolute; top: 18px; right: 18px; }
 .vehicle-dialog form { display: grid; gap: 16px; }
 .vehicle-dialog form h3 { margin: 0; font-size: 28px; }
-.vehicle-dialog form > p { margin: -5px 0 5px; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .vehicle-dialog form label { display: grid; gap: 7px; font-size: 13px; font-weight: 800; }
 .vehicle-dialog form input { min-height: 50px; padding: 10px 13px; border: 1px solid var(--stone); background: var(--white); font: inherit; }
-.vehicle-dialog form > div:last-child { display: flex; align-items: center; gap: 15px; margin-top: 4px; }
+.vehicle-dialog-actions { display: flex; align-items: center; justify-content: end; gap: 15px; margin-top: 4px; }
 .vehicles > header { margin-top: 12px; }
 .vehicles .manager { margin-top: 25px; display: grid; grid-template-columns: auto 1fr auto; padding: 22px; }
 .vehicles .manager small { color: var(--muted); font-size: 11px; }
@@ -787,6 +787,8 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 }
 
 @media (max-width: 680px) {
+  .profile-save-float { right: 18px; bottom: 18px; left: 18px; }
+  .profile-save-float .button { width: 100%; }
   .messages > article > header { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
   .messages > article > header > div { padding-right: 0; }
   .messages > article > header .offer-tag { margin-left: 54px; }
@@ -930,9 +932,20 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
   *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 .account-delete-control { margin-top: 11px; }
-.account-delete-control button { padding: 0; border: 0; background: none; color: var(--red); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
-.account-delete-control button:disabled { cursor: not-allowed; opacity: .6; }
+.real-carrier-profile > .account-delete-control { margin-top: 72px; text-align: center; }
+.account-delete-control > button { padding: 0; border: 0; background: none; color: var(--red); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.account-delete-control > button:disabled { cursor: not-allowed; opacity: .6; }
 .account-delete-control .auth-message { margin: 8px 0 0; }
+.account-delete-dialog-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(22,30,19,.42); }
+.account-delete-dialog { position: relative; width: min(100%, 460px); padding: clamp(28px, 5vw, 42px); background: var(--paper); box-shadow: 0 20px 60px rgba(22,30,19,.24); text-align: left; }
+.carrier-profile .account-delete-dialog { margin-top: 0; border-top: 0; }
+.account-delete-dialog-close { position: absolute; top: 18px; right: 18px; }
+.account-delete-dialog h2 { margin: 0; font-size: 28px; }
+.account-delete-dialog > p { margin: 14px 0 22px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.account-delete-dialog form { display: grid; gap: 18px; }
+.account-delete-dialog input { min-height: 50px; }
+.account-delete-dialog form > div { display: flex; align-items: center; justify-content: end; gap: 15px; }
+.account-delete-dialog .auth-message { margin: 0; }
 .button.danger { background: #8b2f25; color: var(--white); }
 .legal-policy { display: grid; gap: 18px; max-width: 900px; margin: 0 auto 72px; }
 .legal-policy > section { padding: 26px; background: var(--white); border: 1px solid var(--stone); }
