@@ -6,7 +6,6 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   async headers() {
-    const isDevelopment = process.env.NODE_ENV === "development";
     const contentSecurityPolicy = [
       "default-src 'self'",
       "base-uri 'self'",
