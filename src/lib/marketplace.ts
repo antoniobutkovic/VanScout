@@ -3,6 +3,7 @@ import { ensureDatabaseSchema, sqlClient, type AppUser } from "./database";
 import { dateOnly, toTransportRequest } from "./transports";
 import type { CarrierProfile, ChatMessage, Conversation, MarketplaceTransport, OfferStatus, TransportOffer } from "./marketplace-types";
 import { decryptMessage, encryptMessage } from "./message-crypto";
+import { hasRestrictedContactDetails, RestrictedContactDetailsError } from "./contact-details";
 import type { TransportStatus } from "./transport-types";
 import { sendTransportReviewEmail } from "./mailer";
 import { optionalEnv } from "./config";
@@ -79,6 +80,7 @@ export async function listMarketplaceTransports(carrierId: string, { limit = 20,
 }
 
 export async function createOrUpdateOffer(carrier: AppUser, transportId: string, input: { priceCents: number; vatIncluded: boolean; availableDate: string; message: string }): Promise<(TransportOffer & { requesterId: string }) | null> {
+  if (hasRestrictedContactDetails(input.message)) throw new RestrictedContactDetailsError();
   await ensureDatabaseSchema();
   await requireCarrierCredits(carrier.id, input.priceCents);
   const sql = sqlClient();
@@ -759,6 +761,9 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
     LIMIT 1
   `;
   if (!access[0]) return null;
+  if (String(access[0].status) === "pending" && hasRestrictedContactDetails(body)) {
+    throw new RestrictedContactDetailsError();
+  }
   if (String(access[0].carrier_id) === senderId && String(access[0].status) === "pending") {
     await requireCarrierCredits(senderId, Number(access[0].price_cents));
   }
