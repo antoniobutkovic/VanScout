@@ -46,6 +46,7 @@ export function toTransportRequest(row: Record<string, unknown>): TransportReque
     updatedAt: new Date(String(row.updated_at)).toISOString(),
     imageIds: Array.isArray(row.image_ids) ? row.image_ids.map(String) : [],
     hasUnreadOffers: Boolean(row.has_unread_offers),
+    hasReview: Boolean(row.has_review),
   };
 }
 
@@ -66,6 +67,10 @@ export async function listTransportRequests(requesterId: string, filter: "active
         WHERE unread_offer.transport_request_id = vanscout_transport_requests.id
           AND unread_offer.updated_at > COALESCE(read_state.read_at, TIMESTAMPTZ 'epoch')
       ) AS has_unread_offers
+      ,EXISTS (
+        SELECT 1 FROM vanscout_carrier_reviews review
+        WHERE review.transport_request_id = vanscout_transport_requests.id
+      ) AS has_review
     FROM vanscout_transport_requests
     WHERE requester_id = $1 AND ${statusFilter}
     ORDER BY created_at DESC

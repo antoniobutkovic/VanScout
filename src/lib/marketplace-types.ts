@@ -33,8 +33,27 @@ export type CarrierProfile = {
   companyName: string;
   bio: string;
   completedTransports: number;
+  kilometresTravelled: number;
   profileImageId: string | null;
   imageIds: string[];
+  ratingAverage: number | null;
+  ratingCount: number;
+  vehicles: CarrierVehicle[];
+  reviews: CarrierReview[];
+};
+
+export type CarrierVehicle = {
+  id: string;
+  name: string;
+  sizeDescription: string;
+};
+
+export type CarrierReview = {
+  id: string;
+  rating: number;
+  feedback: string;
+  customerName: string;
+  createdAt: string;
 };
 
 export type Conversation = {
@@ -42,6 +61,8 @@ export type Conversation = {
   transportId: string;
   itemName: string;
   otherPartyName: string;
+  otherPartyAvatarUrl: string | null;
+  otherPartyProfileImageId: string | null;
   companyName: string;
   priceCents: number;
   vatIncluded: boolean;
@@ -74,6 +95,8 @@ export type CreditTransaction = {
   amountCents: number;
   kind: "purchase" | "commission" | "refund" | "adjustment";
   description: string;
+  invoiceUrl: string | null;
+  invoicePdfUrl: string | null;
   createdAt: string;
 };
 

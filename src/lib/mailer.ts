@@ -48,3 +48,15 @@ export async function sendEmailVerificationEmail({ to, verificationCode }: { to:
     html: `<p>Your VanScout email verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">${verificationCode}</p><p>This code expires in 15 minutes. If you did not create a VanScout account, you can ignore this email.</p>`,
   });
 }
+
+export async function sendTransportReviewEmail({ to, transporterName, transportName, reviewUrl }: { to: string; transporterName: string; transportName: string; reviewUrl: string }) {
+  const { smtpUser, transporter } = getMailConfig();
+  await transporter.sendMail({
+    from: smtpUser,
+    envelope: { from: smtpUser, to },
+    to,
+    subject: `How was your ${transportName} transport?`,
+    text: `Your transport with ${transporterName} is complete. Please rate your experience and leave optional feedback:\n\n${reviewUrl}`,
+    html: `<p>Your transport with <strong>${transporterName}</strong> is complete.</p><p>Please rate your experience and leave optional feedback:</p><p><a href="${reviewUrl}">Rate your transporter</a></p>`,
+  });
+}

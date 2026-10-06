@@ -13,9 +13,11 @@ import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-
 import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from "../lib/client-auth";
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
 import { offerPriceFromEnteredAmount, offerPriceFromTotal } from "../lib/offer-pricing";
+import { googleMapsDirectionsUrl } from "../lib/google-maps-directions";
+import { CONTACT_DETAILS_RESTRICTED_MESSAGE, hasRestrictedContactDetails } from "../lib/contact-details";
 import type { AddressLocation } from "../lib/location";
 import type { TransportRequest, TransportStatus } from "../lib/transport-types";
-import type { CarrierProfile as CarrierProfileData, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
+import type { CarrierProfile as CarrierProfileData, CarrierVehicle, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
 
 type Offer = { name: string; price: string; rating: string; jobs: string; vehicle: string; time: string; note: string; initials: string; tone: string };
 type AuthRole = "requester" | "transporter";
@@ -28,8 +30,12 @@ const OFFERS: Offer[] = [
 const CATEGORIES = ["Furniture", "Appliances", "Store purchase", "Motorcycle", "Boxes / pallets", "Other"];
 const WIZARD_STEPS = ["Item", "Photos", "Pickup", "Delivery", "Timing", "Review"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TRANSPORT_PAGE_SIZE = 20;
+const ITEM_NAME_MAX_LENGTH = 200;
+const MAX_PICKUP_RADIUS_KM = 3_000;
 
 function Arrow() { return null; }
+function BackIcon() { return <svg className="back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>; }
 function Mark() { return <Link className="brand" to="/" aria-label="VanScout home"><Image src="/vanscout-logo.png" alt="VanScout" width={2172} height={724} /></Link>; }
 function RouteLine({ small = false }: { small?: boolean }) { return <span className={`route-line ${small ? "small" : ""}`}><i /><b /><i /></span>; }
 function TransportRoute({ from, to, short = true, className = "" }: { from: string; to: string; short?: boolean; className?: string }) {
@@ -179,7 +185,7 @@ function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: {
     const container = buttonContainerRef.current;
     let renderedWidth = 0;
     const renderButton = () => {
-      const width = Math.min(400, container.clientWidth);
+      const width = container.clientWidth;
       if (!width || width === renderedWidth || !window.google) return;
       renderedWidth = width;
       container.replaceChildren();
@@ -280,6 +286,9 @@ function useHasMessages(kind?: "customer" | "carrier") {
       return;
     }
     let cancelled = false;
+    let realtimeClient: Realtime | null = null;
+    let userChannelName = "";
+    let realtimeListener: ((message: { name?: string }) => void) | null = null;
     const load = async () => {
       const token = getAuthToken();
       if (!token) {
@@ -297,49 +306,56 @@ function useHasMessages(kind?: "customer" | "carrier") {
     void load();
     const handleMessagesRead = () => void load();
     window.addEventListener("vanscout-messages-read", handleMessagesRead);
-    const timer = window.setInterval(() => void load(), 3000);
-    return () => { cancelled = true; window.removeEventListener("vanscout-messages-read", handleMessagesRead); window.clearInterval(timer); };
+    void (async () => {
+      try {
+        const user = await fetchSessionUser();
+        if (!user || cancelled) return;
+        const token = getAuthToken();
+        const statusResponse = await fetch("/api/realtime/status", { headers: { Authorization: `Bearer ${token}` } });
+        const status = await statusResponse.json() as { enabled?: boolean };
+        if (!statusResponse.ok || !status.enabled || cancelled) return;
+        const client = new Realtime({
+          autoConnect: true,
+          authCallback: async (_params, callback) => {
+            try {
+              const response = await fetch("/api/realtime/ably-token", { headers: { Authorization: `Bearer ${token}` } });
+              const payload = await response.json() as TokenRequest & { error?: string };
+              if (!response.ok) throw new Error(payload.error || "Realtime is unavailable");
+              callback(null, payload);
+            } catch (error) {
+              callback(error instanceof Error ? error.message : "Realtime is unavailable", null);
+            }
+          },
+        });
+        if (cancelled) {
+          client.close();
+          return;
+        }
+        realtimeClient = client;
+        userChannelName = `user:${user.id}`;
+        realtimeListener = message => {
+          if (message.name === "message-created") setHasMessages(true);
+        };
+        await client.channels.get(userChannelName).subscribe(realtimeListener);
+      } catch {
+        // The initial check still displays the current state when realtime is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      window.removeEventListener("vanscout-messages-read", handleMessagesRead);
+      if (realtimeClient && userChannelName && realtimeListener) realtimeClient.channels.get(userChannelName).unsubscribe(realtimeListener);
+      realtimeClient?.close();
+    };
   }, [kind]);
   return hasMessages;
-}
-
-function useHasUnreadOffers(enabled: boolean) {
-  const [hasUnreadOffers, setHasUnreadOffers] = useState(false);
-  useEffect(() => {
-    if (!enabled) {
-      setHasUnreadOffers(false);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      const token = getAuthToken();
-      if (!token) {
-        if (!cancelled) setHasUnreadOffers(false);
-        return;
-      }
-      try {
-        const response = await fetch("/api/transports?status=all", { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
-        const payload = await response.json() as { transports?: TransportRequest[] };
-        if (!cancelled && response.ok) setHasUnreadOffers((payload.transports || []).some(transport => transport.hasUnreadOffers));
-      } catch {
-        // Keep the last known dot state during temporary connection failures.
-      }
-    };
-    void load();
-    const handleOffersRead = () => void load();
-    window.addEventListener("vanscout-offers-read", handleOffersRead);
-    const timer = window.setInterval(() => void load(), 3000);
-    return () => { cancelled = true; window.removeEventListener("vanscout-offers-read", handleOffersRead); window.clearInterval(timer); };
-  }, [enabled]);
-  return hasUnreadOffers;
 }
 
 function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: string }) {
   const { t } = useLanguage();
   const hasMessages = useHasMessages(kind);
-  const hasUnreadOffers = useHasUnreadOffers(kind === "customer");
-  const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["active", "Active", "/carrier/active"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]];
-  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}{hasUnreadOffers && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={`mobile-nav-link ${active === "profile" ? "active" : ""}`} to="/customer/profile">{t("Profile")}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
+  const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]];
+  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={`mobile-nav-link ${active === "profile" ? "active" : ""}`} to="/customer/profile">{t("Profile")}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
 }
 function Footer() { const { t } = useLanguage(); return <footer className="footer"><div className="footer-brand"><Mark /><strong>Contact</strong><a href="mailto:info@van-scout.com">info@van-scout.com</a></div><div className="footer-legal"><strong>{t("Legal information")}</strong><Link to="/politika-privatnosti">{t("Privacy policy")}</Link><Link to="/politika-o-kolacicima">{t("Cookie policy")}</Link><Link to="/uvjeti-koristenja">{t("Terms of use")}</Link><Link to="/impressum">{t("Impressum")}</Link></div><small className="footer-copyright">{t("© 2026 VanScout. All rights reserved.")}</small></footer>; }
 function ItemImage({ type = "bed", label }: { type?: "bed" | "photo"; label?: string }) { const { t } = useLanguage(); return <div className={`item-image ${type}`}><span>{label || (type === "bed" ? <>{t("Bed")}<br />{t("slats")}</> : t("Photo"))}</span></div>; }
@@ -357,6 +373,10 @@ function PrivateImage({ src, alt, className }: { src: string; alt: string; class
     return () => { controller.abort(); if (createdUrl) URL.revokeObjectURL(createdUrl); };
   }, [src]);
   return objectUrl ? <img className={className} src={objectUrl} alt={alt} /> : <span className={className} aria-label={alt} />;
+}
+function ConversationAvatar({ conversation }: { conversation: Conversation }) {
+  const initials = conversation.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase();
+  return <span className="avatar">{conversation.otherPartyProfileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${conversation.otherPartyProfileImageId}`} alt={conversation.otherPartyName} /> : conversation.otherPartyAvatarUrl ? <img className="profile-photo" src={conversation.otherPartyAvatarUrl} alt={conversation.otherPartyName} /> : initials}</span>;
 }
 function FilePreview({ file, className, alt = "" }: { file: File; className?: string; alt?: string }) {
   const [src, setSrc] = useState("");
@@ -393,12 +413,12 @@ function JobDetailImageGallery({ transportId, itemName, imageIds }: { transportI
 function TransportDetailHeader({ request }: { request: TransportRequest }) {
   const { t } = useLanguage();
   const statusTone = transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo);
-  return <header><div><p className="eyebrow">{t(request.category)}</p><h1>{request.itemName}</h1></div><span className={`status large ${statusTone}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></header>;
+  return <header><div><span className={`status large transport-detail-status ${statusTone}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span><h1>{request.itemName}</h1></div></header>;
 }
 
 function TransportDetails({ request, customerName }: { request: TransportRequest; customerName?: string }) {
   const { language, t } = useLanguage();
-  return <section className="transport-detail-content"><h2>{t("Transport details")}</h2>{request.description && <p>{request.description}</p>}<dl className="real-job-facts">{customerName && <div><dt>{t("Customer")}</dt><dd>{customerName}</dd></div>}<div><dt>{t("Dimensions")}</dt><dd>{formatTransportMeasurements(request, language)}</dd></div><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><div><dt>{t("Date")}</dt><dd>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</dd></div><div><dt>{t("Distance")}</dt><dd>{request.distanceKm} km</dd></div></dl>{request.imageIds.length > 0 && <JobDetailImageGallery transportId={request.id} itemName={request.itemName} imageIds={request.imageIds} />}</section>;
+  return <section className="transport-detail-content">{request.description && <p>{request.description}</p>}<dl className="real-job-facts">{customerName && <div><dt>{t("Customer")}</dt><dd>{customerName}</dd></div>}<div><dt>{t("Dimensions")}</dt><dd>{formatTransportMeasurements(request, language)}</dd></div><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><div><dt>{t("Date")}</dt><dd>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</dd></div><div><dt>{t("Distance")}</dt><dd>{request.distanceKm} km</dd></div></dl>{request.imageIds.length > 0 && <JobDetailImageGallery transportId={request.id} itemName={request.itemName} imageIds={request.imageIds} />}</section>;
 }
 
 type LegalDocument = "privacy" | "cookies" | "terms" | "impressum";
@@ -571,13 +591,13 @@ export function CreateRequest() {
     : t(timing);
 
   return <div className="wizard"><header><Mark /><div className="wizard-header-actions"><span>{step + 1} / {WIZARD_STEPS.length}</span><LanguagePicker /><Link to={returnTo}>×</Link></div></header><div className="wizard-progress"><b style={{ width: `${((step + 1) / WIZARD_STEPS.length) * 100}%` }} />{WIZARD_STEPS.map((label, index) => <span className={index === step ? "current" : ""} key={label}>{t(label)}</span>)}</div><main>
-    {step === 0 && <section><h1>{t("What are you moving?")}</h1><div className="choices">{CATEGORIES.map(item => <button type="button" className={category === item ? "selected" : ""} key={item} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><label>{t("Item name")}<input value={itemName} onChange={event => { setItemName(event.target.value); setStepError(""); }} placeholder={t("Bed slats")} /></label><div className="inline-inputs"><label>{t("Length")}<input type="number" min="0.01" step="any" value={dimensions.length} onChange={event => { setDimensions({ ...dimensions, length: event.target.value }); setStepError(""); }} placeholder="cm" /></label><label>{t("Width")}<input type="number" min="0.01" step="any" value={dimensions.width} onChange={event => { setDimensions({ ...dimensions, width: event.target.value }); setStepError(""); }} placeholder="cm" /></label><label>{t("Weight")}<input type="number" min="0.01" step="any" value={dimensions.weight} onChange={event => { setDimensions({ ...dimensions, weight: event.target.value }); setStepError(""); }} placeholder="kg" /></label></div><label><span className="field-label">{t("Description")} <em>({t("Optional")})</em></span><textarea value={description} onChange={event => setDescription(event.target.value)} placeholder={t("Anything carriers should know about the item?")} /></label></section>}
+    {step === 0 && <section><h1>{t("What are you moving?")}</h1><div className="choices">{CATEGORIES.map(item => <button type="button" className={category === item ? "selected" : ""} key={item} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><label>{t("Item name")}<input value={itemName} onChange={event => { setItemName(event.target.value); setStepError(""); }} placeholder={t("Bed slats")} maxLength={ITEM_NAME_MAX_LENGTH} /></label><div className="inline-inputs"><label>{t("Length")}<input type="number" min="0.01" step="any" value={dimensions.length} onChange={event => { setDimensions({ ...dimensions, length: event.target.value }); setStepError(""); }} placeholder="cm" /></label><label>{t("Width")}<input type="number" min="0.01" step="any" value={dimensions.width} onChange={event => { setDimensions({ ...dimensions, width: event.target.value }); setStepError(""); }} placeholder="cm" /></label><label>{t("Weight")}<input type="number" min="0.01" step="any" value={dimensions.weight} onChange={event => { setDimensions({ ...dimensions, weight: event.target.value }); setStepError(""); }} placeholder="kg" /></label></div><label><span className="field-label">{t("Description")} <em>({t("Optional")})</em></span><textarea value={description} onChange={event => setDescription(event.target.value)} placeholder={t("Anything carriers should know about the item?")} /></label></section>}
     {step === 1 && <section className="visual-step"><h1>{t("Show carriers what they’re moving.")}</h1><div className={`drop ${photoPreviews.length ? "has-photos" : ""}`} onDragOver={event => event.preventDefault()} onDrop={dropPhotos}><input ref={photoInput} className="photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={choosePhotos} />{photoPreviews.length > 0 && <div className="photo-previews">{photoPreviews.map((photo, index) => <figure key={photo.id}><img src={photo.url} alt={`${t("Selected photo")} ${index + 1}`} /><button type="button" aria-label={t("Remove photo")} onClick={() => void removePhoto(photo.id)}>×</button></figure>)}</div>}<span>{t("Choose photos from your device or drop them here")}</span><button type="button" className="button dark short" disabled={photos.length >= MAX_REQUEST_IMAGES} onClick={() => photoInput.current?.click()}>{t("Choose photos")}</button></div>{photoError && <p className="field-error photo-error" role="alert">{photoError}</p>}<p className="help">{t("Photos help carriers give you a more accurate price.")} {t("Up to 3 photos.")}</p></section>}
     {step === 2 && <AddressStep label={t("Where should it be picked up?")} kind="pickup" location={pickupLocation} onLocationChange={location => { setPickupLocation(location); setStepError(""); }} />}
     {step === 3 && <AddressStep label={t("Where is it going?")} kind="delivery" location={deliveryLocation} onLocationChange={location => { setDeliveryLocation(location); setStepError(""); }} />}
     {step === 4 && <section><h1>{t("When should it be moved?")}</h1><div className="timing">{["Choose a date", "I’m flexible"].map(item => <button type="button" className={timing === item ? "selected" : ""} key={item} onClick={() => { setTiming(item); setStepError(""); }}><b>{t(item)}</b>{item === "I’m flexible" && <span>{t("Flexible jobs can often receive cheaper offers because carriers can combine them with existing routes.")}</span>}</button>)}</div>{timing === "Choose a date" && (dateRange ? <div className="date-range"><label>{t("From")}<input type="date" value={preferredDateFrom} onChange={event => { setPreferredDateFrom(event.target.value); setStepError(""); }} /></label><label>{t("To")}<input type="date" min={preferredDateFrom || undefined} value={preferredDateTo} onChange={event => { setPreferredDateTo(event.target.value); setStepError(""); }} /></label><button type="button" className="date-range-toggle" onClick={() => { setDateRange(false); setPreferredDateTo(""); setStepError(""); }}>{t("Use a single date")}</button>{preferredDateFrom && preferredDateTo && preferredDateTo < preferredDateFrom && <p className="field-error" role="alert">{t("End date must be on or after start date")}</p>}</div> : <div className="date-single"><label>{t("Transport date")}<input type="date" value={preferredDateFrom} onChange={event => { setPreferredDateFrom(event.target.value); setStepError(""); }} /></label><button type="button" className="date-range-toggle" onClick={() => { setDateRange(true); setStepError(""); }}>+ {t("Add date range")}</button></div>)}</section>}
     {step === 5 && <section className="review-request"><h1>{t("Ready to publish?")}</h1><article>{photoPreviews[0] ? <img className="request-review-image" src={photoPreviews[0].url} alt={`${t("Selected photo")} 1`} /> : <ItemImage label={itemName} />}<div><span>{t(category)}</span><h2>{itemName}</h2><TransportRoute from={pickupLocation?.formatted || t("Pickup location")} to={deliveryLocation?.formatted || t("Delivery location")} /><small>{reviewTiming}</small></div></article>{publishError && <p className="auth-message error" role="alert">{publishError}</p>}</section>}
-    {stepError && <p className="field-error wizard-step-error" role="alert">{stepError}</p>}</main><footer><button type="button" className="button ghost" disabled={step === 0 || publishing} onClick={() => { setStepError(""); setStep(Math.max(0, step - 1)); }}>{t("Back")}</button><button type="button" className="button dark" disabled={publishing} onClick={() => void next()}>{t(step === WIZARD_STEPS.length - 1 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>;
+    {stepError && <p className="field-error wizard-step-error" role="alert">{stepError}</p>}</main><footer><button type="button" className="button ghost" disabled={step === 0 || publishing} onClick={() => { setStepError(""); setStep(Math.max(0, step - 1)); }}><BackIcon />{t("Back")}</button><button type="button" className="button dark" disabled={publishing} onClick={() => void next()}>{t(step === WIZARD_STEPS.length - 1 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>;
 }
 
 function AddressStep({ label, kind, location, onLocationChange }: { label: string; kind: "pickup" | "delivery"; location: AddressLocation | null; onLocationChange: (location: AddressLocation | null) => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; return <section><h1>{label}</h1><AddressPicker label={t(isPickup ? "Pickup location" : "Delivery location")} placeholder={t("Search for an address, business or landmark")} value={location} onChange={onLocationChange} precisionHint={isPickup ? undefined : t("Move the pin to the exact delivery point.")} /><div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div></section>; }
@@ -588,6 +608,8 @@ export function Registration() {
   type AuthStage = "login" | "role" | "profile" | "email-code" | "phone" | "phone-code";
   const requestedMode = searchParams.get("mode");
   const verificationEmail = searchParams.get("verifyEmail") || "";
+  const requestedNext = searchParams.get("next") || "";
+  const safeNext = requestedNext.startsWith("/customer") ? requestedNext : "";
   const [stage, setStage] = useState<AuthStage>(verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login");
   const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester");
   const [firstName, setFirstName] = useState("");
@@ -598,6 +620,7 @@ export function Registration() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordConfirmationError, setPasswordConfirmationError] = useState("");
   const [authError, setAuthError] = useState("");
+  const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [emailCode, setEmailCode] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
@@ -605,7 +628,6 @@ export function Registration() {
   const [localNumber, setLocalNumber] = useState("");
   const [pendingPhoneNumber, setPendingPhoneNumber] = useState("");
   const [phoneError, setPhoneError] = useState("");
-  const [message, setMessage] = useState("");
   const [googleRegistrationToken, setGoogleRegistrationToken] = useState("");
   const emailResendCooldown = useEmailResendCooldown(Boolean(verificationEmail));
   const confirmationResult = useRef<ConfirmationResult | null>(null);
@@ -622,12 +644,11 @@ export function Registration() {
     if (verificationEmail) setEmail(verificationEmail);
     setGoogleRegistrationToken("");
     setAuthError("");
-    setMessage("");
   }, [requestedMode, verificationEmail]);
 
   const syncPhotosAndNavigate = async (token: string, user: AuthenticatedUser) => {
     await syncPendingRequestImages(token).catch(() => false);
-    nav(user.role === "transporter" ? "/carrier" : "/customer");
+    nav(user.role === "transporter" ? "/carrier" : safeNext || "/customer");
   };
 
   const validatePasswords = () => {
@@ -822,8 +843,8 @@ export function Registration() {
 
   return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>
     {stage === "login" && <><h1>{t("Login or create new account")}</h1><GoogleSignInButton onAuthenticated={authenticated} onRegistrationRequired={beginGoogleRegistration} /><div className="or">{t("or")}</div><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to="/auth?mode=register">{t("Create one here")}</Link></p></>}
-    {stage === "role" && <><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setStage("profile")}>{t("Continue")} <Arrow /></button><button className="quiet-link auth-back" type="button" onClick={backToLogin}>← {t("Back")}</button></>}
-    {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" aria-invalid={Boolean(passwordError)} />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}>← {t("Back")}</button></>}
+    {stage === "role" && <><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setStage("profile")}>{t("Continue")} <Arrow /></button><button className="quiet-link auth-back" type="button" onClick={backToLogin}><BackIcon />{t("Back")}</button></>}
+    {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" aria-invalid={Boolean(passwordError)} />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}><BackIcon />{t("Back")}</button></>}
     {stage === "email-code" && <><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form noValidate onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button></>}
     {stage === "phone" && <><h1>{t("Verify your phone.")}</h1><div className="security-note"><b>{t("Why we verify your phone")}</b><p>{t("Once a transport is agreed, VanScout shares phone contacts between both people. A verified number makes coordination easier and helps show that each person is genuine, adding an important layer of safety.")}</p></div><form noValidate onSubmit={sendPhoneCode}><PhoneNumberField country={country} localNumber={localNumber} onCountryChange={value => { setCountry(value); setLocalNumber(""); setPhoneError(""); }} onNumberChange={value => { setLocalNumber(value); setPhoneError(""); }} error={phoneError} />{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full auth-create-button" type="submit" disabled={submitting}>{t("Send verification code")} <Arrow /></button></form></>}
     {stage === "phone-code" && <><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsePhoneNumberFromString(pendingPhoneNumber)?.formatInternational() || pendingPhoneNumber}</strong>.</p><form noValidate onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); setPendingPhoneNumber(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
@@ -933,7 +954,7 @@ export function ForgotPassword() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Reset password")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth">← {t("Back")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Reset password")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth"><BackIcon />{t("Back")}</Link></main></div>;
 }
 
 export function ResetPassword() {
@@ -1021,8 +1042,8 @@ function OfferPrice({ priceCents, vatIncluded, className = "" }: { priceCents: n
   const { t } = useLanguage();
   const { netCents, vatCents, totalCents } = offerPriceFromTotal(priceCents);
   return <span className={`offer-price-breakdown ${className}`.trim()}>
-    <strong>{vatIncluded ? formatEuro(totalCents) : `${formatEuro(netCents)} + ${formatEuro(vatCents)} ${t("VAT")}`}</strong>
-    <small>{vatIncluded ? t("({amount} VAT included)", { amount: formatEuro(vatCents) }) : t("Total: {amount}", { amount: formatEuro(totalCents) })}</small>
+    <strong>{t("Total: {amount}", { amount: formatEuro(totalCents) })}</strong>
+    <small>{vatIncluded ? t("({amount} VAT included)", { amount: formatEuro(vatCents) }) : `${formatEuro(netCents)} + ${formatEuro(vatCents)} ${t("VAT")}`}</small>
   </span>;
 }
 
@@ -1045,10 +1066,18 @@ function formatShortAddress(address: string) {
   return (parts.length > 2 ? parts.slice(0, 2) : parts).join(", ");
 }
 
+function distanceBetweenCoordinates(from: { latitude: number; longitude: number }, to: { latitude: number; longitude: number }) {
+  const toRadians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDifference = toRadians(to.latitude - from.latitude);
+  const longitudeDifference = toRadians(to.longitude - from.longitude);
+  const a = Math.sin(latitudeDifference / 2) ** 2 + Math.cos(toRadians(from.latitude)) * Math.cos(toRadians(to.latitude)) * Math.sin(longitudeDifference / 2) ** 2;
+  return 6_371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function RequestRow({ request, onClick }: { request: TransportRequest; onClick: () => void }) {
   const { language, t } = useLanguage();
   const statusTone = transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo);
-  return <article className="request-row"><TransportImage request={request} /><div><h3>{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span className={`status ${statusTone}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></div><div className="request-meta"><b>{request.distanceKm} km</b><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span></div><button className="button dark short" onClick={onClick}>{t("Open transport")}</button></article>;
+  return <article className="request-row list-item-link" role="button" tabIndex={0} aria-label={`${t("Open transport")}: ${request.itemName}`} onClick={onClick} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onClick(); } }}><TransportImage request={request} /><div><h3>{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /></div><div className="request-meta"><b>{request.distanceKm} km</b><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span></div><span className={`status list-item-status ${statusTone}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>;
 }
 
 export function CustomerWorkspace() {
@@ -1056,7 +1085,8 @@ export function CustomerWorkspace() {
   const loc = useLocation();
   const nav = useNavigate();
   const [view, setView] = useState(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests");
-  const [filter, setFilter] = useState<"active" | "completed">("active");
+  const reviewTransportId = loc.pathname.match(/^\/customer\/review\/([^/]+)$/)?.[1] || "";
+  const [filter, setFilter] = useState<"active" | "completed">(reviewTransportId ? "completed" : "active");
   const [transports, setTransports] = useState<TransportRequest[]>([]);
   const [selectedTransport, setSelectedTransport] = useState<TransportRequest | null>(null);
   const [loadingTransports, setLoadingTransports] = useState(true);
@@ -1066,6 +1096,7 @@ export function CustomerWorkspace() {
   useEffect(() => {
     setView(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests");
     setSelectedTransport(null);
+    if (loc.pathname.includes("/review/")) setFilter("completed");
   }, [loc.pathname]);
 
   useEffect(() => {
@@ -1088,14 +1119,16 @@ export function CustomerWorkspace() {
           return;
         }
         if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
-        setTransports(payload.transports || []);
+        const loaded = payload.transports || [];
+        setTransports(loaded);
+        if (reviewTransportId) setSelectedTransport(loaded.find(transport => transport.id === reviewTransportId) || null);
       })
       .catch(error => {
         if (!(error instanceof DOMException && error.name === "AbortError")) setTransportError(error instanceof Error ? error.message : t("Unable to load transports"));
       })
       .finally(() => { if (!controller.signal.aborted) setLoadingTransports(false); });
     return () => controller.abort();
-  }, [filter, nav, t]);
+  }, [filter, nav, reviewTransportId, t]);
 
   return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title"><div><h1>{t("Your transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => setSelectedTransport(request)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onBack={() => setSelectedTransport(null)} onOpenMessages={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
 }
@@ -1105,7 +1138,9 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
   const [offers, setOffers] = useState<TransportOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [profileCarrierId, setProfileCarrierId] = useState("");
   const hasOffers = !loading && offers.length > 0;
+  const confirmedOffer = offers.find(offer => offer.status === "confirmed");
   const loadOffers = async () => {
     const token = getAuthToken();
     if (!token) return;
@@ -1121,7 +1156,7 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
   };
   useEffect(() => { void loadOffers(); }, [request.id]);
   return <section className="job-detail customer-job-detail">
-    <div className="job-detail-actions"><button className="back detail-back" onClick={onBack}><span aria-hidden="true">←</span><span>{t("Your transports")}</span></button></div>
+    <div className="job-detail-actions"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("Your transports")}</span></button></div>
     <TransportDetailHeader request={request} />
     <div className={`job-layout customer-detail-layout ${hasOffers ? "with-offers" : "no-offers"}`}>
       <TransportDetails request={request} />
@@ -1132,17 +1167,83 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
           <div className="offer-time"><b>{formatTransportDates(offer.availableDate, null, language)}</b><span>{t("Available date")}</span></div>
           {offer.message && <p>“{offer.message}”</p>}
           <div className="price"><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} /></div>
-          <div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="button dark short" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div>
+          <div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="quiet-link" type="button" onClick={() => setProfileCarrierId(offer.carrierId)}>{t("View profile")}</button><button className="button dark short" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div>
         </article>)}</div>
       </aside>}
     </div>
+    {request.status === "completed" && confirmedOffer && <ReviewTransport request={request} offer={confirmedOffer} />}
+    {profileCarrierId && <PublicCarrierProfile carrierId={profileCarrierId} onClose={() => setProfileCarrierId("")} />}
     {error && <p className="transport-list-message error" role="alert">{error}</p>}
   </section>;
+}
+
+function ReviewTransport({ request, offer }: { request: TransportRequest; offer: TransportOffer }) {
+  const { t } = useLanguage();
+  const [rating, setRating] = useState(5);
+  const [feedback, setFeedback] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [submitted, setSubmitted] = useState(Boolean(request.hasReview));
+  const [error, setError] = useState("");
+  const submit = async () => {
+    const token = getAuthToken();
+    if (!token) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch(`/api/transports/${request.id}/review`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ rating, feedback }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to save review"));
+      setSubmitted(true);
+    } catch (reviewError) { setError(reviewError instanceof Error ? reviewError.message : t("Unable to save review")); }
+    finally { setSaving(false); }
+  };
+  return <section className="review transport-review">
+    <p className="eyebrow">{t("Transport complete")}</p>
+    <h2>{submitted ? t("Thank you for your review") : t("How did it go?")}</h2>
+    <p>{offer.companyName || offer.carrierName} · {request.itemName}</p>
+    {!submitted && <><div className="stars" aria-label={t("Rating")}>{[1, 2, 3, 4, 5].map(star => <button type="button" className={star <= rating ? "on" : ""} aria-label={`${star} ${t("stars")}`} aria-pressed={star === rating} onClick={() => setRating(star)} key={star}>★</button>)}</div>
+      <label>{t("Feedback (optional)")}<textarea value={feedback} onChange={event => setFeedback(event.target.value)} maxLength={2000} placeholder={t("Tell other customers about your experience")} /></label>
+      {error && <p className="transport-list-message error">{error}</p>}
+      <button type="button" className="button moss" disabled={saving} onClick={() => void submit()}>{saving ? t("Saving…") : t("Submit review")}</button>
+    </>}
+  </section>;
+}
+
+function CarrierReviews({ profile }: { profile: CarrierProfileData }) {
+  const { language, t } = useLanguage();
+  const ratingSummary = profile.ratingAverage === null
+    ? null
+    : `★ ${profile.ratingAverage.toFixed(1)} · ${profile.ratingCount} ${t("ratings")}`;
+  return <section className="carrier-reviews"><details>
+    <summary><span><b>{t("Customer reviews")}</b>{ratingSummary && <small>{ratingSummary}</small>}</span><span className="review-disclosure" aria-hidden="true" /></summary>
+    <div className="review-list">{profile.reviews.length ? profile.reviews.map(review => <blockquote key={review.id}><b>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</b>{review.feedback && <span>“{review.feedback}”</span>}<footer>— {review.customerName}, {new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { month: "short", year: "numeric" }).format(new Date(review.createdAt))}</footer></blockquote>) : <p>{t("No customer reviews yet")}</p>}</div>
+  </details></section>;
+}
+
+function PublicCarrierProfile({ carrierId, onClose }: { carrierId: string; onClose: () => void }) {
+  const { language, t } = useLanguage();
+  const [profile, setProfile] = useState<CarrierProfileData | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const token = getAuthToken();
+    void fetch(`/api/carriers/${carrierId}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined }).then(async response => {
+      const payload = await response.json() as { profile?: CarrierProfileData; error?: string };
+      if (!response.ok || !payload.profile) throw new Error(payload.error || t("Unable to load profile"));
+      setProfile(payload.profile);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load profile")));
+  }, [carrierId, t]);
+  return <div className="overlay"><aside className="side public-carrier-profile" aria-label={t("Carrier profile")}><button className="close" type="button" onClick={onClose}>×</button>
+    {error ? <p className="transport-list-message error">{error}</p> : !profile ? <p className="transport-list-message">{t("Loading profile…")}</p> : <>
+      <div className="profile-head"><span className="avatar large">{profile.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : profile.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><div><p className="eyebrow">{t("Carrier profile")}</p><h2>{profile.companyName || profile.carrierName}</h2><div className="profile-stats"><span>{profile.completedTransports} {t("completed transports")}</span><span>{new Intl.NumberFormat(language === "hr" ? "hr-HR" : "en-GB").format(profile.kilometresTravelled)} km {t("travelled")}</span></div></div></div>
+      {profile.bio && <p>{profile.bio}</p>}
+      <section><h3>{t("Vehicles")}</h3>{profile.vehicles.length ? profile.vehicles.map(vehicle => <div className="vehicle" key={vehicle.id}>▰ <div><b>{vehicle.name}</b><span>{vehicle.sizeDescription}</span></div></div>) : <p>{t("No vehicles added yet")}</p>}</section>
+      <CarrierReviews profile={profile} />
+    </>}
+  </aside></div>;
 }
 function OfferCard({ offer, onProfile, onMessage, onAccept }: { offer: Offer; onProfile: () => void; onMessage: () => void; onAccept: () => void }) { const { t } = useLanguage(); return <article className="offer"><button onClick={onProfile}><Avatar offer={offer} /></button><div className="offer-person"><button onClick={onProfile}>{offer.name}</button><span>★ {offer.rating} · {t(offer.jobs)}</span><small>{offer.vehicle}</small></div><div className="offer-time"><b>{t(offer.time)}</b><span>{t("Available window")}</span></div><p>“{t(offer.note)}”</p><div className="price"><b>{offer.price}</b><span>{t("all in")}</span></div><div className="offer-actions"><button onClick={onMessage}>{t("Message")}</button><button onClick={onProfile}>{t("View profile")}</button><button className="button moss short" onClick={onAccept}>{t("Accept")}</button></div></article>; }
 function OfferDialog({ offer, onClose, onAccept, onMessage }: { offer: Offer; onClose: () => void; onAccept: () => void; onMessage: () => void }) { const { t } = useLanguage(); const [profile, setProfile] = useState(true); return <div className="overlay">{profile ? <aside className="side"><button className="close" onClick={onClose}>×</button><div className="profile-head"><Avatar offer={offer} large /><div><p className="eyebrow">{t("Verified carrier")}</p><h2>{offer.name}</h2><p>★ {offer.rating} · {t(offer.jobs)} {t("completed")}</p></div></div><p>{t("I move furniture and store purchases around Zagreb with a clean, fully-equipped large van. Clear communication, careful handling.")}</p><section><h3>{t("Vehicle")}</h3><div className="vehicle">▰ <div><b>{offer.vehicle}</b><span>{t("Large van")} · 3.2m {t("cargo length")}</span></div></div></section><section><h3>{t("Previous work")}</h3><div className="work-shots"><span /><span /><span /></div></section><blockquote>{t("On time, careful with everything, and a genuinely nice person.")}<footer>— Ana, {t("verified customer")}</footer></blockquote><footer className="side-actions"><button className="button ghost" onClick={onMessage}>{t("Message")}</button><button className="button moss" onClick={() => setProfile(false)}>{t("Accept")} {offer.price}</button></footer></aside> : <div className="confirm"><button className="close" onClick={onClose}>×</button><p className="eyebrow">{t("Confirm carrier")}</p><h2>{t("Choose {name} for this transport?", { name: offer.name })}</h2><div><b>{offer.price}</b><span>IKEA Zagreb → Trešnjevka</span><span>{t(offer.time)}</span></div><p>{t("After accepting, you and the carrier will be able to see each other’s contact information.")}</p><footer><button className="button ghost" onClick={() => setProfile(true)}>{t("Cancel")}</button><button className="button moss" onClick={onAccept}>{t("Accept offer")}</button></footer></div>}</div>; }
 function Accepted({ onTracking, onReview }: { onTracking: () => void; onReview: () => void }) { const { t } = useLanguage(); return <div className="accepted"><section className="booked-card"><Avatar large /><div><p className="eyebrow">{t("Your carrier")}</p><h2>Mario M.</h2><p>★ 4.9 · Renault Master</p></div><div><a href="tel:+385915552400">+385 91 555 2400</a><a href="mailto:mario@example.com">mario@example.com</a></div></section><div className="transport-steps"><div className="done"><b>✓</b><span><strong>{t("Booked")}</strong><small>{t("Mario accepted your transport.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("Pickup")}</strong><small>{t("Today")}, 17:00–19:00</small></span></div><div><b>○</b><span><strong>{t("In transit")}</strong><small>{t("Live updates will appear here.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("Review the transport when it’s done.")}</small></span></div></div><div className="actions"><button className="button dark" onClick={onTracking}>{t("Open delivery tracking")} <Arrow /></button><button className="quiet-link" onClick={onReview}>{t("Preview review flow")}</button></div></div>; }
-function Messages({ onAccept }: { onAccept: () => void }) { const { t } = useLanguage(); const [note, setNote] = useState(""); const [sent, setSent] = useState<string[]>([]); return <section className="messages-page"><header><p className="eyebrow">{t("Keep it in one place")}</p><h1>{t("Messages")}</h1></header><div className="messages"><aside><button className="conversation selected"><Avatar /><span><b>Mario M.</b><small>{t("Sounds good—17:00 works.")}</small></span><i>2m</i></button><button className="conversation"><Avatar offer={OFFERS[1]} /><span><b>Luka P.</b><small>{t("I can do tomorrow morning.")}</small></span><i>1h</i></button></aside><article><header><div><Avatar /><span><b>Mario M.</b><small>★ 4.9 · Renault Master</small></span></div><b className="offer-tag">{t("Offer: €32")}</b></header><div className="chat-context"><span>{t("Pickup: Today, 17:00–19:00")}</span><button className="button moss short" onClick={onAccept}>{t("Accept offer")}</button></div><div className="thread"><p className="bubble theirs">{t("Hi Ana, I’m already collecting an order near IKEA this afternoon. I can pick up the bed slats between 17:00–19:00.")}</p><p className="bubble mine">{t("Great, that works. It’s ground floor pickup and the slats are already packed.")}</p><p className="contact-note">{t("Contact information can be shared after an offer is accepted.")}</p>{sent.map(x => <p className="bubble mine" key={x}>{x}</p>)}</div><form noValidate onSubmit={event => { event.preventDefault(); if (note.trim()) { setSent([...sent, note.trim()]); setNote(""); } }}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")}>↑</button></form></article></div></section>; }
+function Messages({ onAccept }: { onAccept: () => void }) { const { t } = useLanguage(); const [note, setNote] = useState(""); const [sent, setSent] = useState<string[]>([]); return <section className="messages-page"><header><p className="eyebrow">{t("Keep it in one place")}</p><h1>{t("Messages")}</h1></header><div className="messages"><aside><button className="conversation selected"><Avatar /><span><b>Mario M.</b><small>{t("Sounds good—17:00 works.")}</small></span><i>2m</i></button><button className="conversation"><Avatar offer={OFFERS[1]} /><span><b>Luka P.</b><small>{t("I can do tomorrow morning.")}</small></span><i>1h</i></button></aside><article><header><div><Avatar /><span><b>Mario M.</b><small>★ 4.9 · Renault Master</small></span></div><b className="offer-tag">{t("Offer: €32")}</b></header><div className="chat-context"><span>{t("Pickup: Today, 17:00–19:00")}</span><button className="button moss short" onClick={onAccept}>{t("Accept offer")}</button></div><div className="thread"><p className="bubble theirs">{t("Hi Ana, I’m already collecting an order near IKEA this afternoon. I can pick up the bed slats between 17:00–19:00.")}</p><p className="bubble mine">{t("Great, that works. It’s ground floor pickup and the slats are already packed.")}</p><p className="contact-note">{t("Contact information can be shared after an offer is accepted.")}</p>{sent.map(x => <p className="bubble mine" key={x}>{x}</p>)}</div><form noValidate onSubmit={event => { event.preventDefault(); if (note.trim()) { setSent([...sent, note.trim()]); setNote(""); } }}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form></article></div></section>; }
 function LiveMessages() {
   const { language, t } = useLanguage();
   const [searchParams] = useSearchParams();
@@ -1288,11 +1389,12 @@ function LiveMessages() {
     event.preventDefault();
     const body = note.trim();
     const token = getAuthToken();
-    if (!body) {
-      setError(t("Enter a message before sending"));
+    if (!body) return;
+    if (!token || !selectedId) return;
+    if (selected?.status === "pending" && hasRestrictedContactDetails(body)) {
+      setError(t(CONTACT_DETAILS_RESTRICTED_MESSAGE));
       return;
     }
-    if (!token || !selectedId) return;
     setNote("");
     const response = await fetch(`/api/conversations/${selectedId}/messages`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ body }) });
     const payload = await response.json() as { message?: ChatMessage; error?: string; requiredCents?: number; balanceCents?: number };
@@ -1349,39 +1451,29 @@ function LiveMessages() {
     <header><h1>{t("Messages")}</h1></header>
     {error && <p className="transport-list-message error">{error}</p>}
     {!conversations.length ? <div className="empty-transports"><h2>{t("No conversations yet")}</h2><p>{t("A conversation opens as soon as a carrier sends an offer.")}</p></div> : <div className="messages">
-      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => setSelectedId(conversation.offerId)} key={conversation.offerId}><span className="avatar">{conversation.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span></button>)}</aside>
+      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => setSelectedId(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span></button>)}</aside>
       {selected && <article>
-        <header><div><span className="avatar">{selected.otherPartyName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><span><b>{selected.otherPartyName}</b><small>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
-        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}</div>
-        <div className="thread">{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}{selected.status === "confirmed" && <div className="contact-note contact-revealed"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
-        {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")}>↑</button></form>}
+        <header><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
+        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <div className="contact-note contact-revealed deal-contact"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
+        <div className="thread">{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}{selected.status === "pending" && <p className="contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p>}</div>
+        {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form>}
       </article>}
     </div>}
   </section>;
 }
-function PrivacyControls() {
-  const { t } = useLanguage();
+function DeleteAccountControl() {
+  const { language, t } = useLanguage();
   const nav = useNavigate();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const download = async () => {
-    setBusy(true); setError("");
-    try {
-      const response = await fetch("/api/privacy/export", { cache: "no-store" });
-      if (!response.ok) throw new Error(t("Unable to export your data"));
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `vanscout-data-${new Date().toISOString().slice(0, 10)}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (downloadError) { setError(downloadError instanceof Error ? downloadError.message : t("Unable to export your data")); }
-    finally { setBusy(false); }
-  };
-  const erase = async () => {
-    const confirmation = window.prompt(t("Type DELETE MY ACCOUNT to permanently delete your account and associated data."));
-    if (confirmation !== "DELETE MY ACCOUNT" || !window.confirm(t("This cannot be undone. Continue?"))) return;
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const requiredConfirmation = language === "hr" ? "OBRISI" : "DELETE";
+  const openDialog = () => { setConfirmation(""); setError(""); setDialogOpen(true); };
+  const closeDialog = () => { if (!busy) setDialogOpen(false); };
+  const erase = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (confirmation !== requiredConfirmation) return;
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/privacy/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmation }) });
@@ -1390,7 +1482,7 @@ function PrivacyControls() {
       nav("/", { replace: true });
     } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : t("Unable to delete your account")); setBusy(false); }
   };
-  return <section className="privacy-controls"><h2>{t("Privacy and your data")}</h2><p>{t("Download a copy of your VanScout data or permanently delete your account.")}</p>{error && <p className="auth-message error" role="alert">{error}</p>}<div><button className="button dark short" type="button" disabled={busy} onClick={() => void download()}>{t("Download my data")}</button><button className="button danger short" type="button" disabled={busy} onClick={() => void erase()}>{t("Delete my account")}</button></div></section>;
+  return <div className="account-delete-control"><button type="button" disabled={busy} onClick={openDialog}>{t("Delete my account")}</button>{dialogOpen && <div className="account-delete-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}><section className="account-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-account-title"><button type="button" className="pickup-area-close account-delete-dialog-close" aria-label={t("Close")} disabled={busy} onClick={closeDialog}>×</button><h2 id="delete-account-title">{t("Delete account")}</h2><p>{t("Type {word} to permanently delete your account and associated data.", { word: requiredConfirmation })}</p><form onSubmit={erase}><input autoFocus value={confirmation} onChange={event => setConfirmation(event.target.value)} aria-label={requiredConfirmation} autoComplete="off" spellCheck={false} /><div><button type="button" className="quiet-link" disabled={busy} onClick={closeDialog}>{t("Cancel")}</button><button type="submit" className="button danger short" disabled={busy || confirmation !== requiredConfirmation}>{busy ? t("Deleting…") : t("Delete account")}</button></div>{error && <p className="auth-message error" role="alert">{error}</p>}</form></section></div>}</div>;
 }
 
 function CustomerProfile() {
@@ -1404,7 +1496,7 @@ function CustomerProfile() {
     }).catch(() => setProfile(null));
   }, []);
   const initials = profile?.name.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="profile-page"><p className="eyebrow">{t("Account")}</p><h1>{t("Your profile")}</h1><div className="profile-head"><span className="avatar customer large">{initials}</span><div><h2>{profile?.name || "—"}</h2><p>{profile ? `${profile.email}${profile.phoneNumber ? ` · ${profile.phoneNumber}` : ""}` : t("Loading profile…")}</p></div></div><PrivacyControls /></section>;
+  return <section className="profile-page"><p className="eyebrow">{t("Account")}</p><h1>{t("Your profile")}</h1><div className="profile-head"><span className="avatar customer large">{initials}</span><div><h2>{profile?.name || "—"}</h2><p>{profile ? `${profile.email}${profile.phoneNumber ? ` · ${profile.phoneNumber}` : ""}` : t("Loading profile…")}</p><DeleteAccountControl /></div></div></section>;
 }
 function Review({ onDone }: { onDone: () => void }) { const { t } = useLanguage(); const [rating, setRating] = useState(5); return <section className="review"><p className="eyebrow">{t("Transport complete")}</p><h1>{t("How did it go?")}</h1><div className="profile-head"><Avatar large /><div><h2>Mario M.</h2><p>{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p></div></div><div className="stars">{[1,2,3,4,5].map(n => <button className={n <= rating ? "on" : ""} onClick={() => setRating(n)} key={n}>★</button>)}</div><div className="tags">{["On time", "Great communication", "Careful handling", "Friendly"].map(x => <button key={x}>{t(x)}</button>)}</div><label><textarea placeholder={t("Add a short comment (optional)")} /></label><button className="button moss" onClick={onDone}>{t("Submit review")}</button></section>; }
 export function Tracking() { const { t } = useLanguage(); return <div className="tracking"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /><span>{t("Private delivery tracking")}</span></div></header><main><p className="eyebrow">{t("Bed slats")} · 12 km</p><h1>{t("Your delivery is on the way.")}</h1><div className="tracking-map"><RouteLine /><i>●</i><b className="map-pickup">{t("From")}: IKEA Zagreb</b><b className="map-delivery">{t("To")}: Trešnjevka</b></div><section className="eta"><div><Avatar /><span><b>Mario M.</b><small>Renault Master</small></span></div><div><span>{t("Estimated arrival")}</span><b>18:42</b></div></section><div className="transport-steps tracking-list"><div className="done"><b>✓</b><span><strong>{t("Picked up")}</strong><small>{t("17:28 — Mario has your item.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("In transit")}</strong><small>{t("18:04 — Heavy traffic. ETA updated by 12 minutes.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("We’ll let you know when it arrives.")}</small></span></div></div></main></div>; }
@@ -1412,13 +1504,13 @@ function JobCard({ onOpen, compact = false }: { onOpen: () => void; compact?: bo
 export function CarrierWorkspace() {
   const loc = useLocation();
   const nav = useNavigate();
-  const derive = () => loc.pathname.includes("offers") ? "offers" : loc.pathname.includes("active") ? "active" : loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("credits") ? "credits" : loc.pathname.includes("profile") ? "profile" : "jobs";
+  const derive = () => loc.pathname.includes("offers") || loc.pathname.includes("active") ? "offers" : loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("credits") ? "credits" : loc.pathname.includes("profile") ? "profile" : "jobs";
   const [view, setView] = useState(derive());
   const [selected, setSelected] = useState<MarketplaceTransport | null>(null);
   const [makingOffer, setMakingOffer] = useState(false);
   useEffect(() => { setView(derive()); setSelected(null); setMakingOffer(false); }, [loc.pathname]);
   const go = (next: string, offerId?: string) => { setView(next); nav(next === "jobs" ? "/carrier" : `/carrier/${next}${offerId ? `?offer=${offerId}` : ""}`); };
-  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={setSelected} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onBack={() => setSelected(null)} onOffer={() => setMakingOffer(true)} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onBack={() => setMakingOffer(false)} onSent={offerId => go("messages", offerId)} />}{view === "offers" && <RealCarrierOffers onOpenChat={offerId => go("messages", offerId)} />}{view === "active" && <RealCarrierOffers confirmedOnly onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
+  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={setSelected} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onBack={() => setSelected(null)} onOffer={() => setMakingOffer(true)} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onBack={() => setMakingOffer(false)} onSent={offerId => go("messages", offerId)} />}{view === "offers" && <RealCarrierOffers initialTab={loc.pathname.includes("active") ? "active" : "offers"} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
 }
 
 function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => void }) {
@@ -1426,21 +1518,118 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
   const [transports, setTransports] = useState<MarketplaceTransport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [distanceFilter, setDistanceFilter] = useState<number | null>(null);
+  const [pickupArea, setPickupArea] = useState<AddressLocation | null>(null);
+  const [pickupRadius, setPickupRadius] = useState(25);
+  const [draftPickupArea, setDraftPickupArea] = useState<AddressLocation | null>(null);
+  const [draftPickupRadius, setDraftPickupRadius] = useState(25);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [isPickupAreaOpen, setIsPickupAreaOpen] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadPage = useCallback(async (offset: number) => {
+    const token = getAuthToken();
+    if (!token) throw new Error(t("Unable to load transports"));
+    const response = await fetch(`/api/marketplace/transports?limit=${TRANSPORT_PAGE_SIZE}&offset=${offset}`, { headers: { Authorization: `Bearer ${token}` } });
+    const payload = await response.json() as { transports?: MarketplaceTransport[]; hasMore?: boolean; error?: string };
+    if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
+    return { transports: payload.transports || [], hasMore: Boolean(payload.hasMore) };
+  }, [t]);
   useEffect(() => {
+    setLoading(true);
+    void loadPage(0).then(page => {
+      setTransports(page.transports);
+      setNextOffset(page.transports.length);
+      setHasMore(page.hasMore);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoading(false));
+  }, [loadPage, t]);
+  const persistSearchPreferences = useCallback((preferences: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number }) => {
+    if (!preferencesLoaded) return;
     const token = getAuthToken();
     if (!token) return;
-    void fetch("/api/marketplace/transports", { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
-      const payload = await response.json() as { transports?: MarketplaceTransport[]; error?: string };
-      if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
-      setTransports(payload.transports || []);
-    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoading(false));
-  }, [t]);
-  return <section className="jobs"><div className="workspace-title"><div><h1>{t("Available transports")}</h1></div></div>{loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : transports.length ? transports.map(request => <article className="job" key={request.id}><TransportImage request={request} /><div><h3>{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span><span className={`status request-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></div><b>{request.offerCount} {t("offers")}</b><button className="button dark short" onClick={() => onOpen(request)}>{request.myOffer ? t("View offer") : t("View job")}</button></article>) : <div className="empty-transports"><h2>{t("No available transports")}</h2><p>{t("New customer requests will appear here.")}</p></div>}</section>;
+    void fetch("/api/carrier-search-preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(preferences),
+    });
+  }, [preferencesLoaded]);
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) { setPreferencesLoaded(true); return; }
+    void fetch("/api/carrier-search-preferences", { headers: { Authorization: `Bearer ${token}` } })
+      .then(async response => {
+        const payload = await response.json() as { preferences?: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number } | null };
+        if (!response.ok || !payload.preferences) return;
+        setDistanceFilter(payload.preferences.distanceKm);
+        setPickupArea(payload.preferences.pickupArea);
+        setPickupRadius(Math.min(payload.preferences.pickupRadiusKm, MAX_PICKUP_RADIUS_KM));
+      })
+      .finally(() => setPreferencesLoaded(true));
+  }, []);
+  useEffect(() => {
+    if (!isPickupAreaOpen) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setIsPickupAreaOpen(false); };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isPickupAreaOpen]);
+  const updatePickupArea = (location: AddressLocation | null, radius: number) => {
+    setPickupArea(location);
+    setPickupRadius(radius);
+    persistSearchPreferences({ distanceKm: distanceFilter, pickupArea: location, pickupRadiusKm: radius });
+  };
+  const openPickupAreaDialog = () => {
+    setDraftPickupArea(pickupArea);
+    setDraftPickupRadius(pickupRadius);
+    setIsPickupAreaOpen(true);
+  };
+  const applyPickupArea = () => {
+    updatePickupArea(draftPickupArea, draftPickupRadius);
+    setIsPickupAreaOpen(false);
+  };
+  const clearPickupArea = () => {
+    updatePickupArea(null, draftPickupRadius);
+    setIsPickupAreaOpen(false);
+  };
+  const updateDistanceFilter = (distance: number) => {
+    setDistanceFilter(distance);
+    persistSearchPreferences({ distanceKm: distance, pickupArea, pickupRadiusKm: pickupRadius });
+  };
+  const maximumRouteDistance = useMemo(() => Math.max(250, distanceFilter ?? 0, Math.ceil(Math.max(...transports.map(request => request.distanceKm)) / 10) * 10), [distanceFilter, transports]);
+  const selectedDistance = distanceFilter ?? maximumRouteDistance;
+  const hasDistanceFilter = selectedDistance < maximumRouteDistance;
+  const hasActiveFilters = hasDistanceFilter || Boolean(pickupArea);
+  const pickupAreaSummary = pickupArea ? `${pickupArea.city || t("Select city")} · ${pickupRadius} km` : t("Select radius");
+  const filteredTransports = useMemo(() => transports.filter(request => {
+    if (hasDistanceFilter && request.distanceKm > selectedDistance) return false;
+    if (pickupArea && distanceBetweenCoordinates(pickupArea, request.pickup) > pickupRadius) return false;
+    return true;
+  }), [hasDistanceFilter, pickupArea, pickupRadius, selectedDistance, transports]);
+  const loadMore = () => {
+    setLoadingMore(true);
+    void loadPage(nextOffset).then(page => {
+      setTransports(current => [...current, ...page.transports.filter(transport => !current.some(existing => existing.id === transport.id))]);
+      setNextOffset(current => current + page.transports.length);
+      setHasMore(page.hasMore);
+    }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load transports"))).finally(() => setLoadingMore(false));
+  };
+  return <section className="jobs">
+    <div className="workspace-title jobs-title">
+      <h1>{t("Available transports")}</h1>
+      <div className="job-header-filters">
+        <label className="job-filter-field job-distance-filter transport-length-filter"><input type="range" min="10" max={maximumRouteDistance} step="10" value={selectedDistance} onChange={event => updateDistanceFilter(Number(event.target.value))} aria-valuetext={hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")} /><span><span>{t("Transport length")}</span><strong>{hasDistanceFilter ? t("Up to {distance} km", { distance: selectedDistance }) : t("Any distance")}</strong></span></label>
+        <button type="button" className="pickup-area-trigger" onClick={openPickupAreaDialog} aria-expanded={isPickupAreaOpen} aria-label={t("Pickup area")}><b>{pickupAreaSummary}</b></button>
+      </div>
+    </div>
+    {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Pickup area")}><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: draftPickupRadius })}</strong></span><input type="range" min="5" max={MAX_PICKUP_RADIUS_KM} step="5" value={draftPickupRadius} onChange={event => setDraftPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: draftPickupRadius })} /></label><button type="button" className="pickup-area-close pickup-area-radius-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={draftPickupArea} onChange={setDraftPickupArea} showSearch={false} showCurrentLocation={false} radiusKm={draftPickupRadius} /><div className="pickup-area-actions">{draftPickupArea && <button type="button" className="quiet-link" onClick={clearPickupArea}>{t("Clear location")}</button>}<button type="button" className="button moss pickup-area-apply" onClick={applyPickupArea}>{t("Apply")}</button></div></section></div>}
+    {loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}
+    {hasMore && <button type="button" className="button dark load-more-transports" disabled={loadingMore} onClick={loadMore}>{loadingMore ? t("Loading more…") : t("Load more")}</button>}
+  </section>;
 }
 
 function RealJobDetail({ request, onBack, onOffer }: { request: MarketplaceTransport; onBack: () => void; onOffer: () => void }) {
   const { t } = useLanguage();
-  return <section className="job-detail"><div className="job-detail-actions"><button className="back detail-back" onClick={onBack}><span aria-hidden="true">←</span><span>{t("Available transports")}</span></button>{request.myOffer && <button className="edit-offer-quick" onClick={onOffer}><span>{t("Edit offer")}</span><OfferPrice priceCents={request.myOffer.priceCents} vatIncluded={request.myOffer.vatIncluded} className="compact" /></button>}</div><TransportDetailHeader request={request} /><div className={`job-layout ${request.myOffer ? "single-column" : ""}`}><div><TransportDetails request={request} customerName={request.requesterName} /></div>{!request.myOffer && <aside className="job-offer-card"><h2>{t("Make a clear offer.")}</h2><p>{t("Tell the customer your price and when you can do it.")}</p><button className="button moss full" onClick={onOffer}>{t("Make an offer")} <Arrow /></button></aside>}</div>{!request.myOffer && <button className="button moss mobile-sticky" onClick={onOffer}>{t("Make an offer")}</button>}</section>;
+  return <section className="job-detail"><div className="job-detail-actions"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("Available transports")}</span></button><div className="job-detail-primary-actions"><a className="button ghost short" href={googleMapsDirectionsUrl(request.pickup, request.delivery)} target="_blank" rel="noreferrer">{t("Open in Google Maps")}</a>{request.myOffer ? <button className="edit-offer-quick" onClick={onOffer}><span>{t("Edit offer")}</span><OfferPrice priceCents={request.myOffer.priceCents} vatIncluded={request.myOffer.vatIncluded} className="compact" /></button> : <button className="button moss short" onClick={onOffer}>{t("Make an offer")} <Arrow /></button>}</div></div><TransportDetailHeader request={request} /><div className="job-layout single-column"><div><TransportDetails request={request} customerName={request.requesterName} /></div></div></section>;
 }
 
 function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransport; onBack: () => void; onSent: (offerId: string) => void }) {
@@ -1477,6 +1666,7 @@ function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransp
     const token = getAuthToken();
     if (!token || !priceBreakdown || !date) { setError(t("Enter a valid price and date")); return; }
     if (!hasSufficientCredits) { setError(t("Add {amount} in credits to continue.", { amount: formatEuro(missingCreditsCents) })); return; }
+    if (hasRestrictedContactDetails(message)) { setError(t(CONTACT_DETAILS_RESTRICTED_MESSAGE)); return; }
     setSaving(true); setError("");
     const response = await fetch(`/api/transports/${request.id}/offers`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ priceCents: priceBreakdown.totalCents, vatIncluded, availableDate: date, message }) });
     const payload = await response.json() as { offer?: TransportOffer; error?: string; requiredCents?: number; balanceCents?: number };
@@ -1488,25 +1678,28 @@ function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransp
     }
     if (payload.offer) onSent(payload.offer.id);
   };
-  return <section className="make-offer"><button className="back detail-back" onClick={onBack}><span aria-hidden="true">←</span><span>{t("Job details")}</span></button><h1>{t("Your offer")}</h1><form noValidate onSubmit={submit}><label>{t("Price")}<span className="price-input">€<input inputMode="decimal" value={price} onChange={event => setPrice(event.target.value)} placeholder="0.00" required /></span></label><fieldset className="vat-selection"><legend>{t("VAT treatment")}</legend><label><input type="radio" name="vat-treatment" checked={vatIncluded} onChange={() => setVatIncluded(true)} />{t("VAT included")}</label><label><input type="radio" name="vat-treatment" checked={!vatIncluded} onChange={() => setVatIncluded(false)} />{t("+ VAT")}</label></fieldset>{priceBreakdown && <div className="offer-price-preview"><span>{t("Price the customer pays")}</span><OfferPrice priceCents={priceBreakdown.totalCents} vatIncluded={vatIncluded} /></div>}{requiredCreditsCents > 0 && !hasSufficientCredits && <div className="offer-credit-requirement"><span>{t("Add {amount} in credits to continue.", { amount: formatEuro(missingCreditsCents) })}</span><Link className="button dark short" to="/carrier/credits">{t("Add credits")}</Link></div>}<label>{t("Available date")}<input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={event => setDate(event.target.value)} required /></label><label>{t("Message")} <em>{t("Optional")}</em><textarea value={message} onChange={event => setMessage(event.target.value)} placeholder={t("Tell the customer anything useful about your offer.")} /></label>{error && <p className="transport-list-message error">{error}</p>}<button className="button moss full" disabled={saving || !hasSufficientCredits}>{saving ? t("Sending…") : t(request.myOffer ? "Update offer" : "Send offer")} <Arrow /></button></form></section>;
+  return <section className="make-offer"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("Job details")}</span></button><h1>{t("Your offer")}</h1><form noValidate onSubmit={submit}><label>{t("Price")}<span className="price-input">€<input inputMode="decimal" value={price} onChange={event => setPrice(event.target.value)} placeholder="0.00" required /></span></label><fieldset className="vat-selection"><legend>{t("VAT treatment")}</legend><label><input type="radio" name="vat-treatment" checked={vatIncluded} onChange={() => setVatIncluded(true)} />{t("VAT included")}</label><label><input type="radio" name="vat-treatment" checked={!vatIncluded} onChange={() => setVatIncluded(false)} />{t("+ VAT")}</label></fieldset>{priceBreakdown && <div className="offer-price-preview"><span>{t("Price the customer pays")}</span><OfferPrice priceCents={priceBreakdown.totalCents} vatIncluded={vatIncluded} /></div>}{requiredCreditsCents > 0 && !hasSufficientCredits && <div className="offer-credit-requirement"><span>{t("Add {amount} in credits to continue.", { amount: formatEuro(missingCreditsCents) })}</span><Link className="button dark short" to="/carrier/credits">{t("Add credits")}</Link></div>}<label>{t("Available date")}<input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={event => setDate(event.target.value)} required /></label><label>{t("Message")} <em>{t("Optional")}</em><textarea value={message} onChange={event => setMessage(event.target.value)} placeholder={t("Tell the customer anything useful about your offer.")} /></label>{error && <p className="transport-list-message error">{error}</p>}<button className="button moss full" disabled={saving || !hasSufficientCredits}>{saving ? t("Sending…") : t(request.myOffer ? "Update offer" : "Send offer")} <Arrow /></button></form></section>;
 }
 
 type CarrierOfferRow = TransportOffer & { itemName: string; pickup: string; delivery: string; requesterName: string; transportStatus: TransportStatus; preferredDateFrom: string | null; preferredDateTo: string | null };
-function RealCarrierOffers({ confirmedOnly = false, onOpenChat }: { confirmedOnly?: boolean; onOpenChat?: (offerId: string) => void }) {
+function RealCarrierOffers({ initialTab = "offers", onOpenChat }: { initialTab?: "offers" | "active"; onOpenChat?: (offerId: string) => void }) {
   const { language, t } = useLanguage();
   const [offers, setOffers] = useState<CarrierOfferRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<"offers" | "active">(initialTab);
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
-    void fetch(`/api/offers${confirmedOnly ? "?status=confirmed" : ""}`, { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
+    setLoading(true);
+    setError("");
+    void fetch(`/api/offers${tab === "active" ? "?status=confirmed" : ""}`, { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
       const payload = await response.json() as { offers?: CarrierOfferRow[]; error?: string };
       if (!response.ok) throw new Error(payload.error || t("Unable to load offers"));
       setOffers(payload.offers || []);
     }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load offers"))).finally(() => setLoading(false));
-  }, [confirmedOnly, t]);
-  return <section className="my-offers"><div className="workspace-title"><div><h1>{t(confirmedOnly ? "Active transports" : "My offers")}</h1></div></div>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : offers.length ? offers.map(offer => <article key={offer.id}><ItemImage label={offer.itemName} /><div><h3>{offer.itemName}</h3><TransportRoute from={offer.pickup} to={offer.delivery} short /><small>{offer.requesterName} · {formatTransportDates(offer.availableDate, null, language)}</small></div><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-price" /><span className={`status ${transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo)}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span>{onOpenChat && <button className="button dark short" onClick={() => onOpenChat(offer.id)}>{t("Open chat")}</button>}</article>) : <div className="empty-transports"><h2>{t(confirmedOnly ? "No active transports" : "No offers yet")}</h2><p>{t(confirmedOnly ? "Mutually agreed transports will appear here." : "Offers you send to customers will appear here.")}</p></div>}</section>;
+  }, [tab, t]);
+  return <section className="my-offers"><div className="workspace-title"><div><h1>{t("My offers")}</h1></div><div className="tabs" role="group" aria-label={t("My offers")}><button className={tab === "offers" ? "selected" : ""} aria-pressed={tab === "offers"} onClick={() => setTab("offers")}>{t("My offers")}</button><button className={tab === "active" ? "selected" : ""} aria-pressed={tab === "active"} onClick={() => setTab("active")}>{t("Active transports")}</button></div></div>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : offers.length ? offers.map(offer => <article className={onOpenChat ? "list-item-link" : ""} key={offer.id} role={onOpenChat ? "button" : undefined} tabIndex={onOpenChat ? 0 : undefined} aria-label={onOpenChat ? `${t("Open chat")}: ${offer.itemName}` : undefined} onClick={() => onOpenChat?.(offer.id)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (onOpenChat && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenChat(offer.id); } }}><ItemImage label={offer.itemName} /><div><h3>{offer.itemName}</h3><TransportRoute from={offer.pickup} to={offer.delivery} short /><small>{offer.requesterName} · {formatTransportDates(offer.availableDate, null, language)}</small></div><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-price" /><span className={`status list-item-status ${transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo)}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{t(tab === "active" ? "No active transports" : "No offers yet")}</h2><p>{t(tab === "active" ? "Mutually agreed transports will appear here." : "Offers you send to customers will appear here.")}</p></div>}</section>;
 }
 
 function CarrierProfileEditor() {
@@ -1518,7 +1711,6 @@ function CarrierProfileEditor() {
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
@@ -1537,7 +1729,6 @@ function CarrierProfileEditor() {
     const validFiles = selectedFiles.filter(file => file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024);
     const imagesToAdd = validFiles.slice(0, remainingImageSlots);
     if (imagesToAdd.length) setFiles(current => [...current, ...imagesToAdd]);
-    setMessage("");
     if (validFiles.length !== selectedFiles.length) {
       setError(t("Choose image files up to 10 MB each"));
     } else if (validFiles.length > remainingImageSlots) {
@@ -1551,7 +1742,6 @@ function CarrierProfileEditor() {
     const token = getAuthToken();
     if (!token) return;
     if (!companyName.trim()) {
-      setMessage("");
       setError(t("Enter your company name"));
       return;
     }
@@ -1572,20 +1762,79 @@ function CarrierProfileEditor() {
     setImageIds(payload.profile.imageIds);
     setFiles([]);
     setError("");
-    setMessage(t("Profile saved"));
   };
   const initials = profile?.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="carrier-profile real-carrier-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}</span><span className="profile-photo-action">{t("Change photo")}</span></label><div><h1>{profile?.carrierName || t("Your profile")}</h1><p>{profile?.completedTransports || 0} {t("completed transports")}</p></div></div><form noValidate onSubmit={save}><label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /><span className="field-hint">{t("This name appears on your offers and in customer chats.")}</span></label><label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /><span className="field-hint">{t("A short, specific introduction helps customers choose with confidence.")}</span></label><div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div>{remainingImageSlots > 0 && <label className="business-image-picker"><input type="file" accept="image/*" multiple onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span>＋ {t("Add image")}</span></label>}</div>{imageCount > 0 && <div className="carrier-image-grid">{imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); setMessage(""); }}>×</button></figure>)}{files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); setMessage(""); }}>×</button></figure>)}</div>}{error && <p className="transport-list-message error">{error}</p>}{message && <p className="auth-message success">{message}</p>}<button className="button moss" type="submit">{t("Save profile")}</button></form><PrivacyControls /></section>;
+  const profileChanged = profile !== null && (companyName.trim() !== profile.companyName || bio.trim() !== profile.bio || profileImage !== null || files.length > 0 || imageIds.join(",") !== profile.imageIds.join(","));
+  return <section className="carrier-profile real-carrier-profile">
+    <div className="profile-head">
+      <label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label>
+      <div><h1>{profile?.carrierName || t("Your profile")}</h1><div className="profile-stats"><span>{profile?.completedTransports || 0} {t("completed transports")}</span><span>{new Intl.NumberFormat().format(profile?.kilometresTravelled || 0)} km {t("travelled")}</span></div></div>
+    </div>
+    <form id="carrier-profile-form" noValidate onSubmit={save}>
+      <label>{t("Company name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder={t("e.g. Fast Van Zagreb")} maxLength={150} required /></label>
+      <label>{t("About your business")}<textarea value={bio} onChange={event => setBio(event.target.value)} placeholder={t("Describe your service area, vehicle, availability, and what customers can expect.")} maxLength={1500} /></label>
+      <div className="business-images-field"><div className="business-images-heading"><strong>{t("Business images")}</strong><span className="field-hint">{t("Up to 3 images, 10 MB each")} · {t("{count} of 3 images added", { count: imageCount })}</span></div></div>
+      <div className="carrier-image-grid">
+        {imageIds.map(id => <figure key={id}><PrivateImage src={`/api/carrier-profile/images/${id}`} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setImageIds(current => current.filter(imageId => imageId !== id)); setError(""); }}>×</button></figure>)}
+        {files.map((file, index) => <figure key={`${file.name}-${file.lastModified}-${index}`}><FilePreview file={file} alt={companyName} /><button type="button" aria-label={t("Remove business image")} title={t("Remove business image")} onClick={() => { setFiles(current => current.filter((_, fileIndex) => fileIndex !== index)); setError(""); }}>×</button></figure>)}
+        {Array.from({ length: remainingImageSlots }, (_, index) => <label className="carrier-image-placeholder" key={`placeholder-${index}`} title={t("Add image")}><input type="file" accept="image/*" multiple aria-label={t("Add image")} onChange={event => { addImages(Array.from(event.target.files || [])); event.target.value = ""; }} /><span aria-hidden="true">＋</span></label>)}
+      </div>
+      {error && <p className="transport-list-message error">{error}</p>}
+    </form>
+    {profileChanged && <div className="profile-save-float"><button className="button moss" type="submit" form="carrier-profile-form">{t("Save profile")}</button></div>}
+    {profile && <CarrierReviews profile={profile} />}
+    <VehicleManager vehicles={profile?.vehicles || []} onChange={vehicles => setProfile(current => current ? { ...current, vehicles } : current)} />
+    <DeleteAccountControl />
+  </section>;
+}
+
+function VehicleManager({ vehicles, onChange }: { vehicles: CarrierVehicle[]; onChange: (vehicles: CarrierVehicle[]) => void }) {
+  const { t } = useLanguage();
+  const empty = { name: "", sizeDescription: "" };
+  const [draft, setDraft] = useState<Omit<CarrierVehicle, "id">>(empty);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const closeDialog = () => { if (!saving) { setDialogOpen(false); setEditingId(null); setDraft(empty); setError(""); } };
+  const add = () => { setEditingId(null); setDraft(empty); setError(""); setDialogOpen(true); };
+  const edit = (vehicle: CarrierVehicle) => { const { id, ...next } = vehicle; setEditingId(id); setDraft(next); setError(""); setDialogOpen(true); };
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const token = getAuthToken(); if (!token) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/carrier-profile/vehicles", { method: editingId ? "PUT" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(editingId ? { id: editingId, ...draft } : draft) });
+      const payload = await response.json() as { vehicle?: CarrierVehicle; error?: string };
+      if (!response.ok || !payload.vehicle) throw new Error(payload.error || t("Unable to save vehicle"));
+      onChange(editingId ? vehicles.map(vehicle => vehicle.id === editingId ? payload.vehicle! : vehicle) : [...vehicles, payload.vehicle]);
+      setDialogOpen(false); setDraft(empty); setEditingId(null);
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : t("Unable to save vehicle")); }
+    finally { setSaving(false); }
+  };
+  const remove = async (id: string) => {
+    const token = getAuthToken(); if (!token || !window.confirm(t("Remove this vehicle?"))) return;
+    const response = await fetch(`/api/carrier-profile/vehicles?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    if (response.ok) { onChange(vehicles.filter(vehicle => vehicle.id !== id)); if (editingId === id) closeDialog(); }
+    else setError(t("Unable to remove vehicle"));
+  };
+  return <section className="vehicle-manager"><header><div><h2>{t("Vehicles")}</h2><span>{t("Add the vehicle data customers see on your profile")}</span></div><button type="button" className="button dark short" onClick={add}>{t("Add vehicle")}</button></header>
+    {vehicles.length ? vehicles.map(vehicle => <article key={vehicle.id}><div>▰</div><div><b>{vehicle.name}</b><small>{vehicle.sizeDescription}</small></div><button type="button" className="quiet-link" onClick={() => edit(vehicle)}>{t("Edit")}</button><button type="button" className="quiet-link danger" onClick={() => void remove(vehicle.id)}>{t("Remove")}</button></article>) : <p className="vehicle-empty-state">{t("No vehicles added yet")}</p>}
+    {error && !dialogOpen && <p className="transport-list-message error">{error}</p>}
+    {dialogOpen && <div className="vehicle-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}><section className="vehicle-dialog" role="dialog" aria-modal="true" aria-labelledby="vehicle-dialog-title"><button type="button" className="pickup-area-close vehicle-dialog-close" aria-label={t("Close")} onClick={closeDialog}>×</button><form onSubmit={save}><h3 id="vehicle-dialog-title">{editingId ? t("Edit vehicle") : t("Add vehicle")}</h3><label>{t("Vehicle name")}<input autoFocus value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} maxLength={120} required placeholder={t("e.g. Renault Master")} /></label><label>{t("Size and capacity")}<input value={draft.sizeDescription} onChange={event => setDraft(current => ({ ...current, sizeDescription: event.target.value }))} maxLength={250} required placeholder={t("e.g. Large van · 3.2m cargo length · 1,350kg payload")} /></label>{error && <p className="transport-list-message error">{error}</p>}<div className="vehicle-dialog-actions"><button type="button" className="quiet-link" disabled={saving} onClick={closeDialog}>{t("Cancel")}</button><button className="button moss short" disabled={saving}>{saving ? t("Saving…") : t("Save vehicle")}</button></div></form></section></div>}
+  </section>;
 }
 function JobDetail({ onBack, onOffer }: { onBack: () => void; onOffer: () => void }) { const { t } = useLanguage(); return <section className="job-detail"><button className="back" onClick={onBack}>← {t("Available transports")}</button><header><div><p className="eyebrow">{t("Furniture")} · {t("Flexible")}</p><h1>{t("Bed slats")}</h1><p>IKEA Zagreb <i>→</i> Trešnjevka</p></div><b>12 km</b></header><div className="job-layout"><div><div className="detail-map"><RouteLine /><span>IKEA Zagreb</span><span>Trešnjevka</span></div><section><h2>{t("What you’re moving")}</h2><p>{t("Bed slats, already packed. No loading help required.")}</p><div className="photo-row"><ItemImage type="photo" /><ItemImage type="photo" /></div></section><section className="info-split"><div><span>{t("Pickup")}</span><b>{t("Flexible · Ground floor")}</b></div><div><span>{t("Delivery")}</span><b>{t("Trešnjevka · Elevator available")}</b></div></section></div><aside><p className="eyebrow">{t("Interested")}</p><h2>{t("Make a clear offer.")}</h2><p>{t("Tell the customer your price and when you can do it.")}</p><button className="button moss full" onClick={onOffer}>{t("Make an offer")} <Arrow /></button></aside></div><button className="button moss mobile-sticky" onClick={onOffer}>{t("Make an offer")}</button></section>; }
 function MakeOffer({ onBack, onSend }: { onBack: () => void; onSend: () => void }) { const { t } = useLanguage(); return <section className="make-offer"><button className="back" onClick={onBack}>← {t("Job details")}</button><p className="eyebrow">{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p><h1>{t("Your offer")}</h1><div><label className="price-input">€<input defaultValue="32" /></label><Picker label={t("Pickup availability")} defaultValue="today" options={[{ value: "today", label: <>{t("Today")}, 17:00–19:00</> }, { value: "tomorrow", label: t("Tomorrow, 10:00–12:00") }]} ariaLabel={t("Pickup availability")} /><Picker label={t("Delivery estimate")} defaultValue="45" options={[{ value: "45", label: t("Within 45 minutes of pickup") }, { value: "60", label: t("Within 1 hour of pickup") }]} ariaLabel={t("Delivery estimate")} /><Picker label={t("Vehicle")} defaultValue="master" options={[{ value: "master", label: <>Renault Master · {t("Large van")}</> }]} ariaLabel={t("Vehicle")} /><label>{t("Message")} <em>{t("Optional")}</em><textarea defaultValue={t("I’m already driving through this area tomorrow afternoon.")} /></label><button className="button moss full" onClick={onSend}>{t("Send offer")} <Arrow /></button></div></section>; }
-function MyOffers({ onOpen }: { onOpen: () => void }) { const { t } = useLanguage(); return <section className="my-offers"><div className="workspace-title"><div><p className="eyebrow">{t("Keep an eye on it")}</p><h1>{t("My offers")}</h1></div><div className="tabs"><button className="selected">{t("Pending")}</button><button>{t("Accepted")}</button><button>{t("Past")}</button></div></div><article><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb → Trešnjevka</p></div><strong>€32</strong><span className="status">{t("Waiting for customer")}</span><button className="button dark short" onClick={onOpen}>{t("Open")}</button></article></section>; }
+function MyOffers({ onOpen }: { onOpen: () => void }) { const { t } = useLanguage(); return <section className="my-offers"><div className="workspace-title"><div><p className="eyebrow">{t("Keep an eye on it")}</p><h1>{t("My offers")}</h1></div><div className="tabs"><button className="selected">{t("Pending")}</button><button>{t("Accepted")}</button><button>{t("Past")}</button></div></div><article><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb → Trešnjevka</p></div><strong>€32</strong><span className="status">{t("You are ready — waiting for the customer")}</span><button className="button dark short" onClick={onOpen}>{t("Open")}</button></article></section>; }
 function ActiveDelivery({ stage, onNext, share, onShare }: { stage: number; onNext: () => void; share: boolean; onShare: () => void }) { const { t } = useLanguage(); const title = ["Heading to pickup", "At pickup", "Item collected", "On the way"][stage]; const action = ["I’ve arrived", "Item collected", "Start delivery", "Mark as delivered"][stage]; return <section className="active-delivery"><p className="eyebrow">{t("Active transport")}</p><h1>{t(title)}</h1><div className="active-meta"><div><span>{t("Customer")}</span><b>Ana Novak</b><a href="tel:+385915552400">+385 91 555 2400</a></div><div><span>{t("Route")}</span><b>IKEA Zagreb → Trešnjevka</b><button>{t("Open navigation")}</button></div></div><div className="active-map"><RouteLine /><i>●</i></div><div className="share"><div><b>{t("Share live location with customer")}</b><p>{t("Your customer will receive a private tracking link until delivery is completed.")}</p></div><button className={share ? "switch on" : "switch"} onClick={onShare}><span /></button></div><div className="update-buttons">{["Traffic", "Pickup delay", "Customer unavailable", "Other"].map(x => <button key={x}>{t(x)}</button>)}</div><button className="button moss delivery-action" onClick={onNext}>{t(action)}</button></section>; }
 function Wallet() {
   const { language, t } = useLanguage();
   const [searchParams] = useSearchParams();
   const [account, setAccount] = useState<CreditAccount | null>(null);
   const [amount, setAmount] = useState("5");
+  const [billingRecipient, setBillingRecipient] = useState<"personal" | "company">("personal");
+  const [companyName, setCompanyName] = useState("");
+  const [companyOib, setCompanyOib] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1619,9 +1868,17 @@ function Wallet() {
       setError(t("Choose an amount between €5 and €500"));
       return;
     }
+    if (billingRecipient === "company" && (!companyName.trim() || !companyOib.trim())) {
+      setError(t("Enter the company name and OIB for the invoice"));
+      return;
+    }
     setSaving(true);
     setError("");
-    const response = await fetch("/api/credits/checkout", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ amountCents }) });
+    const response = await fetch("/api/credits/checkout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ amountCents, billingRecipient, ...(billingRecipient === "company" ? { companyName, companyOib } : {}) }),
+    });
     const payload = await response.json() as { url?: string; error?: string };
     if (!response.ok || !payload.url) {
       setSaving(false);
@@ -1630,7 +1887,7 @@ function Wallet() {
     }
     window.location.assign(payload.url);
   };
-  return <section className="wallet"><h1>{t("Balance")}</h1><strong>{loading ? "—" : formatEuro(account?.balanceCents || 0)}</strong><p className="credit-explanation">{t("When a transport is confirmed by both sides, 5% of its agreed price is deducted from your credits.")}</p>{checkoutStatus === "success" && <p className="auth-message success">{t("Payment completed. Your balance will update as soon as Stripe confirms it.")}</p>}{checkoutStatus === "cancelled" && <p className="auth-message">{t("Checkout was cancelled. No credits were added.")}</p>}{error && <p className="transport-list-message error">{error}</p>}<div className="checkout"><h2>{t("Add credits")}</h2><div><label>€<input type="number" inputMode="decimal" min="5" max="500" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} aria-label={t("Custom amount")} /></label></div><button type="button" className="button dark full" disabled={saving || !account?.stripeConfigured} onClick={() => void checkout()}>{saving ? t("Opening Stripe…") : `${t("Continue to Stripe")} · €${amount}`}</button>{!account?.stripeConfigured && !loading && <p className="field-hint">{t("Stripe needs to be configured before credits can be purchased.")}</p>}</div><article className="activity"><h2>{t("Recent activity")}</h2>{account?.transactions.length ? account.transactions.map(transaction => <div key={transaction.id}><span><b>{transaction.amountCents > 0 ? "+ " : "− "}{formatEuro(Math.abs(transaction.amountCents))}</b><small>{t(transaction.description)}</small></span><time>{new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(transaction.createdAt))}</time></div>) : <p className="transport-list-message">{t("No credit activity yet")}</p>}</article></section>;
+  return <section className="wallet">{checkoutStatus === "success" && <p className="auth-message success">{t("Payment completed. Your balance will update as soon as Stripe confirms it.")}</p>}{checkoutStatus === "cancelled" && <p className="auth-message">{t("Checkout was cancelled. No credits were added.")}</p>}{error && <p className="transport-list-message error">{error}</p>}<div className="wallet-payment-layout"><aside className="balance-summary"><span>{t("Current balance")}</span><strong>{loading ? "—" : formatEuro(account?.balanceCents || 0)}</strong></aside><section className="checkout" aria-labelledby="add-credits-title"><div className="checkout-heading"><h2 id="add-credits-title">{t("Add credits")}</h2></div><label className="credit-amount-input"><span aria-hidden="true">€</span><input type="number" inputMode="decimal" min="5" max="500" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} aria-label={t("Custom amount")} /></label><div className="credit-presets" aria-label={t("Custom amount")}>{["5", "10", "25", "50"].map(value => <button type="button" className={amount === value ? "selected" : ""} aria-pressed={amount === value} key={value} onClick={() => setAmount(value)}>€{value}</button>)}</div><fieldset className="billing-recipient"><legend>{t("Invoice recipient")}</legend><div><label className={billingRecipient === "personal" ? "selected" : ""}><input type="radio" name="billing-recipient" checked={billingRecipient === "personal"} onChange={() => setBillingRecipient("personal")} /><span>{t("Private person")}</span></label><label className={billingRecipient === "company" ? "selected" : ""}><input type="radio" name="billing-recipient" checked={billingRecipient === "company"} onChange={() => setBillingRecipient("company")} /><span>{t("Company")}</span></label></div></fieldset>{billingRecipient === "company" && <div className="company-invoice-fields"><label>{t("Company legal name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} maxLength={150} autoComplete="organization" required /></label><label>{t("OIB")}<input value={companyOib} onChange={event => setCompanyOib(event.target.value)} inputMode="numeric" autoComplete="off" maxLength={16} required /></label><p className="field-hint">{t("We will add the company name and Croatian OIB to the Stripe invoice.")}</p></div>}<button type="button" className="button dark full" disabled={saving || !account?.stripeConfigured} onClick={() => void checkout()}>{saving ? t("Opening Stripe…") : `${t("Continue to Stripe")} · €${amount}`}</button>{!account?.stripeConfigured && !loading && <p className="field-hint">{t("Stripe needs to be configured before credits can be purchased.")}</p>}</section></div><p className="credit-explanation">{t("When a transport is confirmed by both sides, 5% of its agreed price is deducted from your credits.")}</p><article className="activity"><h2>{t("Recent activity")}</h2>{account?.transactions.length ? account.transactions.map(transaction => <div key={transaction.id}><span><b>{transaction.amountCents > 0 ? "+ " : "− "}{formatEuro(Math.abs(transaction.amountCents))}</b><small>{t(transaction.description)}</small>{transaction.invoicePdfUrl && <a className="invoice-link" href={transaction.invoicePdfUrl} target="_blank" rel="noreferrer">{t("Download invoice")}</a>}</span><time>{new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(transaction.createdAt))}</time></div>) : <p className="transport-list-message">{t("No credit activity yet")}</p>}</article></section>;
 }
 function CarrierProfile({ onVehicles }: { onVehicles: () => void }) { const { t } = useLanguage(); return <section className="carrier-profile"><div className="profile-head"><Avatar large /><div><p className="eyebrow">{t("Verified carrier")}</p><h1>Mario M.</h1><p>★ 4.9 · 127 {t("completed transports")}</p></div></div><p>{t("I’m an independent carrier in Zagreb. I care about being on time, communicating clearly, and delivering everything in the condition it left.")}</p><section><header><h2>{t("Vehicles")}</h2><button className="quiet-link" onClick={onVehicles}>{t("Manage")}</button></header><div className="vehicle">▰ <div><b>Renault Master</b><span>{t("Large Van")} · 3.2m {t("cargo length")} · 1,350kg {t("payload")}</span></div></div></section><section><h2>{t("Reviews")}</h2><blockquote>“{t("Mario was early, thoughtful and took great care with the furniture.")}”<footer>— Petra, {t("verified customer")}</footer></blockquote></section></section>; }
 function Vehicles({ onBack }: { onBack: () => void }) { const { t } = useLanguage(); return <section className="vehicles"><button className="back" onClick={onBack}>← {t("Carrier profile")}</button><header><div><p className="eyebrow">{t("Your equipment")}</p><h1>{t("Vehicles")}</h1></div><button className="button dark short">{t("Add vehicle")}</button></header><div className="vehicle manager">▰ <div><b>Renault Master</b><span>{t("Large Van")}</span><small>3.2m {t("cargo length")} · 1.7m {t("width")} · 1,350kg {t("payload")}</small></div><p><button>{t("Edit")}</button><button className="danger">{t("Remove")}</button></p></div></section>; }

@@ -63,9 +63,18 @@ separate `MAIL_FROM` value is not required.
 
 ## Stripe transporter credits
 
-Transporters purchase prepaid credits through Stripe-hosted Checkout. Configure
-`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, keep both server-side, and set
-`APP_URL` to the public application origin. The Stripe webhook destination is:
+Transporters purchase prepaid credits through Stripe-hosted Checkout. Every
+successful credit purchase creates a paid Stripe invoice. Checkout always
+collects the billing address: a buyer can select a private-person invoice, or
+enter a Croatian company name and validated 11-digit OIB. Company OIBs are
+saved as Stripe's `hr_oib` customer tax ID, so they appear on the issued
+invoice. The invoice PDF is available from the transporter's wallet activity.
+
+Configure `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, keep both
+server-side, and set `APP_URL` to the public application origin. If you use a
+restricted Stripe key, grant it read/write access to Checkout Sessions and
+Customers, write access to Customer Tax IDs, and read access to Invoices. The
+Stripe webhook destination is:
 
 ```text
 https://your-domain.example/api/stripe/webhook
@@ -76,6 +85,17 @@ Subscribe it to `checkout.session.completed` and
 adds purchased credits, and duplicate Stripe deliveries are handled
 idempotently. When both sides agree to a transport, 5% of the offer price is
 deducted once from the transporter's credit balance.
+
+Set the issuer's legal business name, address, OIB/PDV ID, invoice numbering,
+and invoice-email settings in the Stripe Dashboard before production. Set
+`STRIPE_TAX_ENABLED=true` only after Stripe Tax has been configured with the
+correct Croatian tax registration and product tax treatment. Optionally set
+`STRIPE_INVOICE_FOOTER` for the legal text that should appear on Stripe PDFs.
+
+Stripe's PDF invoice is not a Croatian fiscalized receipt or structured
+eRačun. Croatian B2C fiscalization and domestic B2B eRačun/eIzvještavanje
+requirements must be completed through a compliant fiscalization/eRačun
+provider or Porezna uprava integration before launch.
 
 The web experience includes the public landing pages, transport request wizard,
 customer offers and messaging workspace, carrier job flow, wallet, delivery

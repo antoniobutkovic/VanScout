@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import {
   CarrierWorkspace,
   CheckEmail,
@@ -16,6 +16,7 @@ import {
 import { dashboardPath, fetchSessionUser, type SessionRole } from "./lib/client-auth";
 
 function RequireSession({ role, children }: { role: SessionRole; children: ReactNode }) {
+  const location = useLocation();
   const [sessionRole, setSessionRole] = useState<SessionRole | null>();
 
   useEffect(() => {
@@ -30,7 +31,7 @@ function RequireSession({ role, children }: { role: SessionRole; children: React
   }, []);
 
   if (sessionRole === undefined) return <div className="session-loading" aria-busy="true" />;
-  if (sessionRole === null) return <Navigate to="/auth" replace />;
+  if (sessionRole === null) return <Navigate to={`/auth?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />;
   if (sessionRole !== role) return <Navigate to={dashboardPath(sessionRole)} replace />;
   return children;
 }

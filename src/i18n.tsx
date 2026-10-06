@@ -1,7 +1,8 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { Picker } from "./components/Picker";
+import { languageFromBrowser, type Language } from "./lib/language";
 
-export type Language = "en" | "hr";
+export type { Language } from "./lib/language";
 
 type TranslationParams = Record<string, string | number>;
 
@@ -399,10 +400,34 @@ const CROATIAN: Record<string, string> = {
   "View job": "Pogledaj posao",
   Flexible: "Fleksibilno",
   "Pickup area": "Područje preuzimanja",
+  Apply: "Primijeni",
+  "Select city": "Odaberite grad",
+  "Select radius": "Odaberite radijus",
+  "Select pickup area": "Odaberite područje preuzimanja",
+  "Pickup radius": "Radijus preuzimanja",
+  "Set a point and show transports whose pickup is within your selected straight-line radius.": "Postavite točku i prikažite prijevoze čije je preuzimanje unutar odabranog radijusa zračne udaljenosti.",
+  "Close pickup area map": "Zatvori kartu područja preuzimanja",
+  "Click or move the map to choose the centre of your pickup area.": "Kliknite ili pomaknite kartu kako biste odabrali središte područja preuzimanja.",
   Destination: "Odredište",
   Date: "Datum",
   Category: "Kategorija",
   "Available transports": "Dostupni prijevozi",
+  Status: "Status",
+  "All statuses": "Svi statusi",
+  "Route distance": "Udaljenost rute",
+  "Transport length": "Duljina transporta",
+  "Any distance": "Bilo koja udaljenost",
+  "Up to {distance} km": "Do {distance} km",
+  "Pickup near me": "Preuzimanje blizu mene",
+  "Any pickup location": "Bilo koja lokacija preuzimanja",
+  "Within {distance} km": "U krugu od {distance} km",
+  "Clear filters": "Očisti filtre",
+  "No transports match your filters": "Nema prijevoza koji odgovaraju filtrima",
+  "Try adjusting or clearing your filters.": "Pokušajte prilagoditi ili očistiti filtre.",
+  "Try adjusting the route distance.": "Pokušajte prilagoditi udaljenost rute.",
+  "Unable to determine your location. Enable location access and try again.": "Nije moguće odrediti vašu lokaciju. Omogućite pristup lokaciji i pokušajte ponovno.",
+  "Load more": "Učitaj još",
+  "Loading more…": "Učitavanje dodatnih prijevoza…",
   Profile: "Profil",
   "Available date": "Dostupan datum",
   "Open chat": "Otvori razgovor",
@@ -482,7 +507,6 @@ const CROATIAN: Record<string, string> = {
   Pending: "Na čekanju",
   Accepted: "Prihvaćene",
   Past: "Prošle",
-  "Waiting for customer": "Čeka se korisnik",
   Open: "Otvori",
   "Active transport": "Aktivni prijevoz",
   "Heading to pickup": "Na putu prema preuzimanju",
@@ -494,6 +518,7 @@ const CROATIAN: Record<string, string> = {
   "Mark as delivered": "Označi kao dostavljeno",
   Customer: "Korisnik",
   "Open navigation": "Otvori navigaciju",
+  "Open in Google Maps": "Otvori u Google kartama",
   "Share live location with customer": "Podijeli lokaciju uživo s korisnikom",
   "Your customer will receive a private tracking link until delivery is completed.": "Korisnik će primati privatnu poveznicu za praćenje dok se dostava ne završi.",
   Traffic: "Gužva",
@@ -502,6 +527,7 @@ const CROATIAN: Record<string, string> = {
   Other: "Ostalo",
   "Your funds": "Vaša sredstva",
   Balance: "Stanje",
+  "Current balance": "Trenutno stanje",
   "Add funds": "Dodaj sredstva",
   "Payment method": "Način plaćanja",
   "Visa ending in 2400": "Visa koja završava na 2400",
@@ -544,10 +570,24 @@ const CROATIAN: Record<string, string> = {
   "Opening Stripe…": "Otvaranje Stripea…",
   "Continue to Stripe": "Nastavi na Stripe",
   "Stripe needs to be configured before credits can be purchased.": "Stripe mora biti konfiguriran prije kupnje kredita.",
+  "Invoice recipient": "Primatelj računa",
+  "Private person": "Privatna osoba",
+  Company: "Tvrtka",
+  "Company legal name": "Puni naziv tvrtke",
+  OIB: "OIB",
+  "Enter the company name and OIB for the invoice": "Unesite naziv tvrtke i OIB za račun.",
+  "We will add the company name and Croatian OIB to the Stripe invoice.": "Naziv tvrtke i hrvatski OIB dodat ćemo na Stripe račun.",
+  "Download invoice": "Preuzmi račun",
   "No credit activity yet": "Još nema aktivnosti kredita",
   "Stripe credit purchase": "Kupnja kredita putem Stripea",
   "Commission for confirmed transport": "Provizija za potvrđeni prijevoz",
   "Carrier profile": "Profil prijevoznika",
+  "Customer reviews": "Recenzije korisnika",
+  "No customer reviews yet": "Još nema recenzija korisnika",
+  "No ratings yet": "Još nema ocjena",
+  ratings: "ocjena",
+  travelled: "prijeđenih",
+  "Vehicle details are shown on your public carrier profile.": "Podaci o vozilu prikazuju se na vašem javnom profilu prijevoznika.",
   Vehicles: "Vozila",
   Manage: "Upravljaj",
   Reviews: "Recenzije",
@@ -559,11 +599,12 @@ const CROATIAN: Record<string, string> = {
   "Privacy and your data": "Privatnost i vaši podaci",
   "Download a copy of your VanScout data or permanently delete your account.": "Preuzmite kopiju svojih VanScout podataka ili trajno izbrišite račun.",
   "Download my data": "Preuzmi moje podatke",
-  "Delete my account": "Izbriši moj račun",
+  "Delete my account": "Izbriši račun",
+  "Delete account": "Izbriši račun",
+  "Type {word} to permanently delete your account and associated data.": "Upišite {word} kako biste trajno izbrisali račun i povezane podatke.",
+  "Deleting…": "Brisanje…",
   "Unable to export your data": "Nije moguće izvesti vaše podatke",
   "Unable to delete your account": "Nije moguće izbrisati vaš račun",
-  "Type DELETE MY ACCOUNT to permanently delete your account and associated data.": "Upišite DELETE MY ACCOUNT kako biste trajno izbrisali račun i povezane podatke.",
-  "This cannot be undone. Continue?": "Ovu radnju nije moguće poništiti. Nastaviti?",
   "Loading profile…": "Učitavanje profila…",
 };
 
@@ -579,22 +620,30 @@ type I18nContextValue = {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
-export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<Language>("en");
+const LANGUAGE_PREFERENCE_KEY = "vanscout-language-preference";
+const LANGUAGE_COOKIE = "vanscout-language";
 
-  useEffect(() => {
-    const stored = window.localStorage.getItem("vanscout-language");
-    if (stored === "hr" || stored === "en") {
-      setLanguage(stored);
-      return;
-    }
-    const browserLanguage = window.navigator.languages?.[0] ?? window.navigator.language;
-    setLanguage(browserLanguage.toLowerCase().startsWith("hr") ? "hr" : "en");
-  }, []);
+function initialBrowserLanguage(fallback?: Language) {
+  if (typeof window === "undefined") return fallback ?? "en";
+
+  const savedLanguage = window.localStorage.getItem(LANGUAGE_PREFERENCE_KEY);
+  if (savedLanguage === "hr" || savedLanguage === "en") return savedLanguage;
+
+  return fallback ?? languageFromBrowser(window.navigator.languages, window.navigator.language);
+}
+
+export function I18nProvider({ children, initialLanguage }: { children: ReactNode; initialLanguage?: Language }) {
+  const [language, setLanguageState] = useState<Language>(() => initialBrowserLanguage(initialLanguage));
+
+  const setLanguage = (nextLanguage: Language) => {
+    setLanguageState(nextLanguage);
+    window.localStorage.setItem(LANGUAGE_PREFERENCE_KEY, nextLanguage);
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${LANGUAGE_COOKIE}=${nextLanguage}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem("vanscout-language", language);
     document.documentElement.lang = language;
     document.title = "VanScout";
     document.querySelector('meta[name="description"]')?.setAttribute("content", language === "hr" ? "Objavite što trebate prevesti i primite ponude lokalnih prijevoznika." : "Post what you need moved and receive offers from local carriers.");
