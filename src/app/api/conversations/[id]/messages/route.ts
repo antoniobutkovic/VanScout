@@ -4,6 +4,7 @@ import { authenticatedUser } from "@/lib/request-auth";
 import { InsufficientCreditsError, listMessages, sendMessage } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { RestrictedContactDetailsError } from "@/lib/contact-details";
 
 const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
 
@@ -33,6 +34,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ]);
     return NextResponse.json({ message }, { status: 201 });
   } catch (error) {
+    if (error instanceof RestrictedContactDetailsError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     if (error instanceof InsufficientCreditsError) {
       return NextResponse.json({ error: "Insufficient credits", requiredCents: error.requiredCents, balanceCents: error.balanceCents }, { status: 402 });
     }

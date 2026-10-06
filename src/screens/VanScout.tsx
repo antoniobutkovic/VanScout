@@ -14,6 +14,7 @@ import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from 
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
 import { offerPriceFromEnteredAmount, offerPriceFromTotal } from "../lib/offer-pricing";
 import { googleMapsDirectionsUrl } from "../lib/google-maps-directions";
+import { CONTACT_DETAILS_RESTRICTED_MESSAGE, hasRestrictedContactDetails } from "../lib/contact-details";
 import type { AddressLocation } from "../lib/location";
 import type { TransportRequest, TransportStatus } from "../lib/transport-types";
 import type { CarrierProfile as CarrierProfileData, CarrierVehicle, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
@@ -1380,6 +1381,10 @@ function LiveMessages() {
     const token = getAuthToken();
     if (!body) return;
     if (!token || !selectedId) return;
+    if (selected?.status === "pending" && hasRestrictedContactDetails(body)) {
+      setError(t(CONTACT_DETAILS_RESTRICTED_MESSAGE));
+      return;
+    }
     setNote("");
     const response = await fetch(`/api/conversations/${selectedId}/messages`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ body }) });
     const payload = await response.json() as { message?: ChatMessage; error?: string; requiredCents?: number; balanceCents?: number };
@@ -1440,7 +1445,7 @@ function LiveMessages() {
       {selected && <article>
         <header><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
         <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <div className="contact-note contact-revealed deal-contact"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
-        <div className="thread">{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}</div>
+        <div className="thread">{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}{selected.status === "pending" && <p className="contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p>}</div>
         {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form>}
       </article>}
     </div>}
@@ -1651,6 +1656,7 @@ function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransp
     const token = getAuthToken();
     if (!token || !priceBreakdown || !date) { setError(t("Enter a valid price and date")); return; }
     if (!hasSufficientCredits) { setError(t("Add {amount} in credits to continue.", { amount: formatEuro(missingCreditsCents) })); return; }
+    if (hasRestrictedContactDetails(message)) { setError(t(CONTACT_DETAILS_RESTRICTED_MESSAGE)); return; }
     setSaving(true); setError("");
     const response = await fetch(`/api/transports/${request.id}/offers`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ priceCents: priceBreakdown.totalCents, vatIncluded, availableDate: date, message }) });
     const payload = await response.json() as { offer?: TransportOffer; error?: string; requiredCents?: number; balanceCents?: number };
