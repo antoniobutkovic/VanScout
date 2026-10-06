@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasRestrictedContactDetails } from "./contact-details";
+import { hasDistributedPhoneNumber, hasRestrictedContactDetails } from "./contact-details";
 
 describe("contact detail restriction", () => {
   it.each([
@@ -24,5 +24,17 @@ describe("contact detail restriction", () => {
     "I can bring two people to help.",
   ])("allows ordinary transport details: %s", value => {
     expect(hasRestrictedContactDetails(value)).toBe(false);
+  });
+
+  it("blocks a phone number split between consecutive messages", () => {
+    expect(hasDistributedPhoneNumber(["097", "655109", "7"])).toBe(true);
+  });
+
+  it("allows date fragments split between consecutive messages", () => {
+    expect(hasDistributedPhoneNumber(["12", "10", "2026"])).toBe(false);
+  });
+
+  it("does not combine ordinary prose from separate messages", () => {
+    expect(hasDistributedPhoneNumber(["I can arrive at 17", "and leave at 00"])).toBe(false);
   });
 });

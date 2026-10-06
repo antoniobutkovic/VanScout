@@ -3,7 +3,7 @@ import { ensureDatabaseSchema, sqlClient, type AppUser } from "./database";
 import { dateOnly, toTransportRequest } from "./transports";
 import type { CarrierProfile, ChatMessage, Conversation, MarketplaceTransport, OfferStatus, TransportOffer } from "./marketplace-types";
 import { decryptMessage, encryptMessage } from "./message-crypto";
-import { hasRestrictedContactDetails, RestrictedContactDetailsError } from "./contact-details";
+import { hasDistributedPhoneNumber, hasRestrictedContactDetails, RestrictedContactDetailsError } from "./contact-details";
 import type { TransportStatus } from "./transport-types";
 import { sendTransportReviewEmail } from "./mailer";
 import { optionalEnv } from "./config";
@@ -763,6 +763,19 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
   if (!access[0]) return null;
   if (String(access[0].status) === "pending" && hasRestrictedContactDetails(body)) {
     throw new RestrictedContactDetailsError();
+  }
+  if (String(access[0].status) === "pending") {
+    const recentMessages = await sql`
+      SELECT sender_id, body
+      FROM vanscout_messages
+      WHERE offer_id = ${offerId}
+      ORDER BY created_at DESC
+      LIMIT 2
+    `;
+    if (recentMessages.length > 0 && recentMessages.every(message => String(message.sender_id) === senderId)) {
+      const parts = [...recentMessages.reverse().map(message => decryptMessage(String(message.body))), body];
+      if (hasDistributedPhoneNumber(parts)) throw new RestrictedContactDetailsError();
+    }
   }
   if (String(access[0].carrier_id) === senderId && String(access[0].status) === "pending") {
     await requireCarrierCredits(senderId, Number(access[0].price_cents));
