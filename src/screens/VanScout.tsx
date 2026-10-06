@@ -177,17 +177,27 @@ function GoogleSignInButton({ role, onAuthenticated, onRegistrationRequired }: {
   useEffect(() => {
     if (!googleReady || !window.google || !buttonContainerRef.current) return;
     const container = buttonContainerRef.current;
-    container.replaceChildren();
-    window.google.accounts.id.renderButton(container, {
-      type: "standard",
-      theme: "outline",
-      size: "large",
-      text: "continue_with",
-      shape: "rectangular",
-      logo_alignment: "center",
-      width: Math.min(400, container.clientWidth || 400),
-      locale: language,
-    });
+    let renderedWidth = 0;
+    const renderButton = () => {
+      const width = Math.min(400, container.clientWidth);
+      if (!width || width === renderedWidth || !window.google) return;
+      renderedWidth = width;
+      container.replaceChildren();
+      window.google.accounts.id.renderButton(container, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "rectangular",
+        logo_alignment: "center",
+        width,
+        locale: language,
+      });
+    };
+    renderButton();
+    const observer = new ResizeObserver(renderButton);
+    observer.observe(container);
+    return () => observer.disconnect();
   }, [googleReady, language]);
 
   return <div className={`google-sign-in ${isSigningIn ? "is-loading" : ""}`} aria-busy={isSigningIn}><div ref={buttonContainerRef} />{error && <p className="google-auth-error">{error}</p>}</div>;
@@ -329,7 +339,7 @@ function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: stri
   const hasMessages = useHasMessages(kind);
   const hasUnreadOffers = useHasUnreadOffers(kind === "customer");
   const carrierLinks = [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["active", "Active", "/carrier/active"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]];
-  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}{hasUnreadOffers && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
+  return <header className={`topbar ${kind ? "app-topbar" : ""}`}><Mark />{kind === "carrier" ? <nav>{carrierLinks.map(([key, label, href]) => <Link className={active === key ? "active" : ""} key={key} to={href}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link>)}</nav> : kind === "customer" ? <nav><Link className={active === "requests" ? "active" : ""} to="/customer">{t("Requests")}{hasUnreadOffers && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={active === "messages" ? "active" : ""} to="/customer/messages">{t("Messages")}{hasMessages && <span className="notification-indicator" aria-hidden="true" />}</Link><Link className={`mobile-nav-link ${active === "profile" ? "active" : ""}`} to="/customer/profile">{t("Profile")}</Link></nav> : null}<HeaderActions kind={kind} /></header>;
 }
 function Footer() { const { t } = useLanguage(); return <footer className="footer"><div className="footer-brand"><Mark /><strong>Contact</strong><a href="mailto:info@van-scout.com">info@van-scout.com</a></div><div className="footer-legal"><strong>{t("Legal information")}</strong><Link to="/politika-privatnosti">{t("Privacy policy")}</Link><Link to="/politika-o-kolacicima">{t("Cookie policy")}</Link><Link to="/uvjeti-koristenja">{t("Terms of use")}</Link><Link to="/impressum">{t("Impressum")}</Link></div><small className="footer-copyright">{t("© 2026 VanScout. All rights reserved.")}</small></footer>; }
 function ItemImage({ type = "bed", label }: { type?: "bed" | "photo"; label?: string }) { const { t } = useLanguage(); return <div className={`item-image ${type}`}><span>{label || (type === "bed" ? <>{t("Bed")}<br />{t("slats")}</> : t("Photo"))}</span></div>; }
