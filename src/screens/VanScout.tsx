@@ -35,7 +35,6 @@ const ITEM_NAME_MAX_LENGTH = 200;
 const MAX_PICKUP_RADIUS_KM = 3_000;
 
 function Arrow() { return null; }
-function BackIcon() { return <svg className="back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>; }
 function Mark() { return <Link className="brand" to="/" aria-label="VanScout home"><Image src="/vanscout-logo.png" alt="VanScout" width={2172} height={724} /></Link>; }
 function RouteLine({ small = false }: { small?: boolean }) { return <span className={`route-line ${small ? "small" : ""}`}><i /><b /><i /></span>; }
 function TransportRoute({ from, to, short = true, className = "" }: { from: string; to: string; short?: boolean; className?: string }) {
@@ -506,7 +505,8 @@ export function CreateRequest() {
   const nav = useNavigate();
   const loc = useLocation();
   const returnTo = (loc.state as { returnTo?: string } | null)?.returnTo === "/customer" ? "/customer" : "/";
-  const [step, setStep] = useState(0);
+  const requestedStep = Number(new URLSearchParams(loc.search).get("step"));
+  const step = Number.isInteger(requestedStep) && requestedStep >= 0 && requestedStep < WIZARD_STEPS.length ? requestedStep : 0;
   const [category, setCategory] = useState("Furniture");
   const [itemName, setItemName] = useState("");
   const [description, setDescription] = useState("");
@@ -543,7 +543,7 @@ export function CreateRequest() {
       if (dateRange && !preferredDateTo) return setStepError(t("Choose an end date to continue"));
       if (dateRange && preferredDateTo < preferredDateFrom) return setStepError(t("End date must be on or after start date"));
     }
-    if (step !== WIZARD_STEPS.length - 1) return setStep(step + 1);
+    if (step !== WIZARD_STEPS.length - 1) return nav(`/create-request?step=${step + 1}`, { state: loc.state });
     const token = getAuthToken();
     if (!token) return nav("/auth");
     if (!pickupLocation || !deliveryLocation) return;
@@ -642,7 +642,7 @@ export function CreateRequest() {
     {step === 3 && <AddressStep label={t("Where is it going?")} kind="delivery" location={deliveryLocation} onLocationChange={location => { setDeliveryLocation(location); setStepError(""); }} />}
     {step === 4 && <section><h1>{t("When should it be moved?")}</h1><div className="timing">{["Choose a date", "I’m flexible"].map(item => <button type="button" className={timing === item ? "selected" : ""} key={item} onClick={() => { setTiming(item); setStepError(""); }}><b>{t(item)}</b>{item === "I’m flexible" && <span>{t("Flexible jobs can often receive cheaper offers because carriers can combine them with existing routes.")}</span>}</button>)}</div>{timing === "Choose a date" && (dateRange ? <div className="date-range"><label>{t("From")}<input type="date" value={preferredDateFrom} onChange={event => { setPreferredDateFrom(event.target.value); setStepError(""); }} /></label><label>{t("To")}<input type="date" min={preferredDateFrom || undefined} value={preferredDateTo} onChange={event => { setPreferredDateTo(event.target.value); setStepError(""); }} /></label><button type="button" className="date-range-toggle" onClick={() => { setDateRange(false); setPreferredDateTo(""); setStepError(""); }}>{t("Use a single date")}</button>{preferredDateFrom && preferredDateTo && preferredDateTo < preferredDateFrom && <p className="field-error" role="alert">{t("End date must be on or after start date")}</p>}</div> : <div className="date-single"><label>{t("Transport date")}<input type="date" value={preferredDateFrom} onChange={event => { setPreferredDateFrom(event.target.value); setStepError(""); }} /></label><button type="button" className="date-range-toggle" onClick={() => { setDateRange(true); setStepError(""); }}>+ {t("Add date range")}</button></div>)}</section>}
     {step === 5 && <section className="review-request"><h1>{t("Ready to publish?")}</h1><article>{photoPreviews[0] ? <img className="request-review-image" src={photoPreviews[0].url} alt={`${t("Selected photo")} 1`} /> : <ItemImage label={itemName} />}<div><span>{t(category)}</span><h2>{itemName}</h2><TransportRoute from={pickupLocation?.formatted || t("Pickup location")} to={deliveryLocation?.formatted || t("Delivery location")} /><small>{reviewTiming}</small></div></article>{publishError && <p className="auth-message error" role="alert">{publishError}</p>}</section>}
-    {stepError && <p className="field-error wizard-step-error" role="alert">{stepError}</p>}</main><footer><button type="button" className="button ghost" disabled={step === 0 || publishing} onClick={() => { setStepError(""); setStep(Math.max(0, step - 1)); }}><BackIcon />{t("Back")}</button><button type="button" className="button dark" disabled={publishing} onClick={() => void next()}>{t(step === WIZARD_STEPS.length - 1 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>;
+    {stepError && <p className="field-error wizard-step-error" role="alert">{stepError}</p>}</main><footer><button type="button" className="button dark" disabled={publishing} onClick={() => void next()}>{t(step === WIZARD_STEPS.length - 1 ? "Publish request" : "Continue")} <Arrow /></button></footer></div>;
 }
 
 function AddressStep({ label, kind, location, onLocationChange }: { label: string; kind: "pickup" | "delivery"; location: AddressLocation | null; onLocationChange: (location: AddressLocation | null) => void }) { const { t } = useLanguage(); const isPickup = kind === "pickup"; return <section><h1>{label}</h1><AddressPicker label={t(isPickup ? "Pickup location" : "Delivery location")} placeholder={t("Search for an address, business or landmark")} value={location} onChange={onLocationChange} precisionHint={isPickup ? undefined : t("Move the pin to the exact delivery point.")} /><div className="details"><Picker label={t("Floor")} defaultValue="ground" options={[{ value: "ground", label: t("Ground floor") }, { value: "first", label: t("1st floor") }, { value: "upper", label: t("2nd floor+") }]} ariaLabel={t("Floor")} /><label><input type="checkbox" /> {t("Elevator available")}</label><label><input type="checkbox" /> {t("Help needed")}</label><label>{t("Instructions")}<textarea placeholder={t("Parking, access, entrance…")} /></label></div></section>; }
@@ -651,11 +651,14 @@ export function Registration() {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
   type AuthStage = "login" | "role" | "profile" | "email-code" | "phone" | "phone-code";
+  const authStages: AuthStage[] = ["login", "role", "profile", "email-code", "phone", "phone-code"];
   const requestedMode = searchParams.get("mode");
   const verificationEmail = searchParams.get("verifyEmail") || "";
   const requestedNext = searchParams.get("next") || "";
   const safeNext = requestedNext.startsWith("/customer") ? requestedNext : "";
-  const [stage, setStage] = useState<AuthStage>(verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login");
+  const requestedStage = searchParams.get("stage");
+  const stageFromUrl = authStages.includes(requestedStage as AuthStage) ? requestedStage as AuthStage : null;
+  const [stage, setStage] = useState<AuthStage>(stageFromUrl ?? (verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login"));
   const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -679,13 +682,23 @@ export function Registration() {
   const recaptchaVerifier = useRef<RecaptchaVerifier | null>(null);
   const firebaseAuth = useRef<Auth | null>(null);
 
+  const setAuthStage = (next: AuthStage, replace = false) => {
+    setStage(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("stage", next);
+    nav(`/auth?${params.toString()}`, { replace });
+  };
+
   useEffect(() => () => {
     recaptchaVerifier.current?.clear();
     recaptchaVerifier.current = null;
   }, []);
 
   useEffect(() => {
-    setStage(verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login");
+    setStage(stageFromUrl ?? (verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login"));
+  }, [requestedMode, stageFromUrl, verificationEmail]);
+
+  useEffect(() => {
     if (verificationEmail) setEmail(verificationEmail);
     setGoogleRegistrationToken("");
     setAuthError("");
@@ -719,7 +732,7 @@ export function Registration() {
     if (!validatePasswords()) return;
     if (stage === "profile" && googleRegistrationToken) {
       setAuthError("");
-      setStage("phone");
+      setAuthStage("phone");
       return;
     }
     setSubmitting(true);
@@ -734,7 +747,7 @@ export function Registration() {
       if (!response.ok) {
         if (payload.code === "EMAIL_NOT_VERIFIED") {
           await fetch("/api/auth/email/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-          setStage("email-code");
+          setAuthStage("email-code");
           emailResendCooldown.start();
           return;
         }
@@ -742,14 +755,14 @@ export function Registration() {
       }
       if (stage === "profile") {
         setEmail(payload.email || email);
-        setStage("email-code");
+        setAuthStage("email-code");
         emailResendCooldown.start();
         return;
       }
       if (!payload.user) throw new Error(t("Unable to sign in"));
       setRole(payload.user.role);
       if (!payload.user.phoneVerified) {
-        setStage("phone");
+        setAuthStage("phone");
         return;
       }
       await syncPhotosAndNavigate(getAuthToken(), payload.user);
@@ -765,7 +778,7 @@ export function Registration() {
     setGoogleRegistrationToken("");
     setRole(user.role);
     if (user.phoneVerified) void syncPhotosAndNavigate(getAuthToken(), user);
-    else setStage("phone");
+    else setAuthStage("phone");
   };
 
   const beginGoogleRegistration = ({ token, profile }: GoogleRegistration) => {
@@ -777,16 +790,7 @@ export function Registration() {
     setPassword("");
     setPasswordConfirmation("");
     setAuthError("");
-    setStage("role");
-  };
-
-  const backToLogin = () => {
-    setGoogleRegistrationToken("");
-    setFirstName("");
-    setLastName("");
-    setEmail("");
-    setStage("login");
-    nav("/auth");
+    setAuthStage("role");
   };
 
   const verifyEmailCode = async (event: FormEvent<HTMLFormElement>) => {
@@ -799,7 +803,7 @@ export function Registration() {
       if (!response.ok || !payload.user) throw new Error(payload.error || t("Unable to verify your email"));
       window.localStorage.removeItem("auth_token");
       setRole(payload.user.role);
-      setStage("phone");
+      setAuthStage("phone");
     } catch (error) { setAuthError(error instanceof Error ? error.message : t("Unable to verify your email")); }
     finally { setSubmitting(false); }
   };
@@ -846,7 +850,7 @@ export function Registration() {
       recaptchaVerifier.current = verifier;
       confirmationResult.current = await signInWithPhoneNumber(auth, phoneNumber, verifier);
       setPendingPhoneNumber(phoneNumber);
-      setStage("phone-code");
+      setAuthStage("phone-code");
       setMessage(configPayload.firebase.testMode ? "" : t("We sent a six-digit code to your phone."));
     } catch (error) {
       const message = firebasePhoneError(error, t, "send");
@@ -888,11 +892,11 @@ export function Registration() {
 
   return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>
     {stage === "login" && <><h1>{t("Login or create new account")}</h1><GoogleSignInButton onAuthenticated={authenticated} onRegistrationRequired={beginGoogleRegistration} /><div className="or">{t("or")}</div><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to="/auth?mode=register">{t("Create one here")}</Link></p></>}
-    {stage === "role" && <><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setStage("profile")}>{t("Continue")} <Arrow /></button><button className="quiet-link auth-back" type="button" onClick={backToLogin}><BackIcon />{t("Back")}</button></>}
-    {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" aria-invalid={Boolean(passwordError)} />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form><button type="button" className="quiet-link auth-back" onClick={() => setStage("role")}><BackIcon />{t("Back")}</button></>}
+    {stage === "role" && <><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setAuthStage("profile")}>{t("Continue")} <Arrow /></button></>}
+    {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" aria-invalid={Boolean(passwordError)} />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form></>}
     {stage === "email-code" && <><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form noValidate onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button></>}
     {stage === "phone" && <><h1>{t("Verify your phone.")}</h1><div className="security-note"><b>{t("Why we verify your phone")}</b><p>{t("Once a transport is agreed, VanScout shares phone contacts between both people. A verified number makes coordination easier and helps show that each person is genuine, adding an important layer of safety.")}</p></div><form noValidate onSubmit={sendPhoneCode}><PhoneNumberField country={country} localNumber={localNumber} onCountryChange={value => { setCountry(value); setLocalNumber(""); setPhoneError(""); }} onNumberChange={value => { setLocalNumber(value); setPhoneError(""); }} error={phoneError} />{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full auth-create-button" type="submit" disabled={submitting}>{t("Send verification code")} <Arrow /></button></form></>}
-    {stage === "phone-code" && <><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsePhoneNumberFromString(pendingPhoneNumber)?.formatInternational() || pendingPhoneNumber}</strong>.</p><form noValidate onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setStage("phone"); setPhoneCode(""); setPendingPhoneNumber(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
+    {stage === "phone-code" && <><h1>{t("Enter your phone code")}</h1><p>{t("Enter the code sent to")} <strong>{parsePhoneNumberFromString(pendingPhoneNumber)?.formatInternational() || pendingPhoneNumber}</strong>.</p><form noValidate onSubmit={verifyPhoneCode}><OtpInput value={phoneCode} onChange={setPhoneCode} disabled={submitting} />{message && <p className="auth-message success">{message}</p>}{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || phoneCode.length !== 6}>{t("Verify and continue")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => { setAuthStage("phone"); setPhoneCode(""); setPendingPhoneNumber(""); confirmationResult.current = null; }}>{t("Send a new code or change phone number")}</button></>}
     <div id="firebase-phone-recaptcha" />
   </main></div>;
 }
@@ -936,7 +940,7 @@ export function CheckEmail() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Check your email")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><label>{t("Email")}<input type="email" value={email} onChange={event => { setEmail(event.target.value); setError(""); }} autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<Link className="button dark full auth-create-button" to={`/auth?verifyEmail=${encodeURIComponent(email)}`} onClick={event => { if (!email.trim()) { event.preventDefault(); setError(t("Enter your email address")); } else if (!isValidEmail(email)) { event.preventDefault(); setError(t("Enter a valid email address")); } }}>{t("Continue verification")}</Link><button className="quiet-link center" type="button" onClick={() => void resend()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button><Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Check your email")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><label>{t("Email")}<input type="email" value={email} onChange={event => { setEmail(event.target.value); setError(""); }} autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<Link className="button dark full auth-create-button" to={`/auth?verifyEmail=${encodeURIComponent(email)}`} onClick={event => { if (!email.trim()) { event.preventDefault(); setError(t("Enter your email address")); } else if (!isValidEmail(email)) { event.preventDefault(); setError(t("Enter a valid email address")); } }}>{t("Continue verification")}</Link><button className="quiet-link center" type="button" onClick={() => void resend()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button></main></div>;
 }
 
 export function VerifyEmail() {
@@ -960,7 +964,7 @@ export function VerifyEmail() {
     }).catch(() => setStatus("error"));
   }, [token]);
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{status === "loading" ? t("Confirming your email…") : status === "success" ? t("Email verified") : t("Unable to verify your email")}</h1><p>{status === "success" ? t("Your email has been verified. You can now sign in.") : status === "error" ? t("This verification link is invalid or expired") : t("Please wait while we confirm your email.")}</p><Link className="button dark full auth-create-button" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{status === "loading" ? t("Confirming your email…") : status === "success" ? t("Email verified") : t("Unable to verify your email")}</h1><p>{status === "success" ? t("Your email has been verified. You can now sign in.") : status === "error" ? t("This verification link is invalid or expired") : t("Please wait while we confirm your email.")}</p>{status !== "loading" && <Link className="button dark full auth-create-button" to="/auth">{t("Sign in")}</Link>}</main></div>;
 }
 
 export function ForgotPassword() {
@@ -999,7 +1003,7 @@ export function ForgotPassword() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Reset password")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form><Link className="quiet-link auth-back" to="/auth"><BackIcon />{t("Back")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main><h1>{t("Reset password")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Send reset link")} <Arrow /></button></form></main></div>;
 }
 
 export function ResetPassword() {
@@ -1046,7 +1050,7 @@ export function ResetPassword() {
     }
   };
 
-  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!token ? <p className="auth-message error">{t("This reset link is invalid or expired")}</p> : <form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("New password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} autoComplete="new-password" aria-describedby="reset-password-hint" aria-invalid={Boolean(passwordError)} /><span className="field-hint" id="reset-password-hint">{t("Use at least 12 characters")}</span>{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation">{t("Confirm password")}<PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Reset password")} <Arrow /></button></form>}<Link className="quiet-link auth-back" to="/auth">{t("Back to sign in")}</Link></main></div>;
+  return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>{!token ? <p className="auth-message error">{t("This reset link is invalid or expired")}</p> : <form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("New password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} autoComplete="new-password" aria-describedby="reset-password-hint" aria-invalid={Boolean(passwordError)} /><span className="field-hint" id="reset-password-hint">{t("Use at least 12 characters")}</span>{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation">{t("Confirm password")}<PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label>{message && <p className="auth-message success">{message}</p>}{error && <p className="auth-message error" role="alert">{error}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Reset password")} <Arrow /></button></form>}</main></div>;
 }
 
 function isTransportOverdue(status: TransportStatus, preferredDateFrom: string | null, preferredDateTo: string | null) {
@@ -1136,8 +1140,9 @@ export function CustomerWorkspace() {
   const loc = useLocation();
   const nav = useNavigate();
   const [view, setView] = useState(loc.pathname.includes("messages") ? "messages" : loc.pathname.includes("profile") ? "profile" : "requests");
-  const reviewTransportId = loc.pathname.match(/^\/customer\/review\/([^/]+)$/)?.[1] || "";
-  const [filter, setFilter] = useState<"active" | "completed">(reviewTransportId ? "completed" : "active");
+  const selectedTransportId = loc.pathname.match(/^\/customer\/(?:requests|review)\/([^/]+)$/)?.[1] || "";
+  const isReviewRoute = loc.pathname.startsWith("/customer/review/");
+  const [filter, setFilter] = useState<"active" | "completed">(isReviewRoute ? "completed" : "active");
   const [transports, setTransports] = useState<TransportRequest[]>([]);
   const [selectedTransport, setSelectedTransport] = useState<TransportRequest | null>(null);
   const [loadingTransports, setLoadingTransports] = useState(true);
@@ -1172,19 +1177,19 @@ export function CustomerWorkspace() {
         if (!response.ok) throw new Error(payload.error || t("Unable to load transports"));
         const loaded = payload.transports || [];
         setTransports(loaded);
-        if (reviewTransportId) setSelectedTransport(loaded.find(transport => transport.id === reviewTransportId) || null);
+        if (selectedTransportId) setSelectedTransport(loaded.find(transport => transport.id === selectedTransportId) || null);
       })
       .catch(error => {
         if (!(error instanceof DOMException && error.name === "AbortError")) setTransportError(error instanceof Error ? error.message : t("Unable to load transports"));
       })
       .finally(() => { if (!controller.signal.aborted) setLoadingTransports(false); });
     return () => controller.abort();
-  }, [filter, nav, reviewTransportId, t]);
+  }, [filter, nav, selectedTransportId, t]);
 
-  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title transport-workspace-title"><div><h1>{t("My transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => setSelectedTransport(request)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onBack={() => setSelectedTransport(null)} onOpenMessages={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
+  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title transport-workspace-title"><div><h1>{t("My transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => nav(`/customer/requests/${request.id}`)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onOpenMessages={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
 }
 
-function RequestDetail({ request, onBack, onOpenMessages }: { request: TransportRequest; onBack: () => void; onOpenMessages: (offerId: string) => void }) {
+function RequestDetail({ request, onOpenMessages }: { request: TransportRequest; onOpenMessages: (offerId: string) => void }) {
   const { language, t } = useLanguage();
   const [offers, setOffers] = useState<TransportOffer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1207,7 +1212,6 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
   };
   useEffect(() => { void loadOffers(); }, [request.id]);
   return <section className="job-detail customer-job-detail">
-    <div className="job-detail-actions"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("Your transports")}</span></button></div>
     <TransportDetailHeader request={request} />
     <div className={`job-layout customer-detail-layout ${hasOffers ? "with-offers" : "no-offers"}`}>
       <TransportDetails request={request} />
@@ -1307,9 +1311,6 @@ function LiveMessages() {
   const selectedId = requestedConversation?.offerId || (mobile ? "" : desktopSelectedId);
   const openConversation = (offerId: string) => {
     setSearchParams(current => { const next = new URLSearchParams(current); next.set("offer", offerId); return next; });
-  };
-  const backToConversations = () => {
-    setSearchParams(current => { const next = new URLSearchParams(current); next.delete("offer"); return next; }, { replace: true });
   };
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userId, setUserId] = useState("");
@@ -1560,7 +1561,7 @@ function LiveMessages() {
     {!conversations.length ? <div className="empty-transports"><h2>{t("No conversations yet")}</h2><p>{t("A conversation opens as soon as a carrier sends an offer.")}</p></div> : <div className="messages live-messages">
       <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => openConversation(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.otherPartyName}</b><small>{t(conversationStatusLabel(conversation))}</small></span>{mobile ? <span className="conversation-meta"><span className="offer-tag conversation-price"><OfferPrice priceCents={conversation.priceCents} vatIncluded={conversation.vatIncluded} /></span>{conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</span> : conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</button>)}</aside>
       {selected && <article>
-        <header><button type="button" className="mobile-chat-back" aria-label={t("Back to messages")} onClick={backToConversations}><BackIcon /></button><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div>{!mobile && <span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span>}</header>
+        <header><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div>{!mobile && <span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span>}</header>
         <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <>{mobile && <b className="mobile-contact-status">{t("Contact details unlocked")}</b>}<div className="contact-note contact-revealed deal-contact">{!mobile && <b>{t("Contact details unlocked")}</b>}{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div></>}</div>
         <div className="thread" ref={threadRef}>{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}</div>
         {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <>{selected.status === "pending" && <p className="contact-note compose-contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p>}<form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form></>}
@@ -1633,9 +1634,18 @@ export function CarrierWorkspace() {
   const [selected, setSelected] = useState<MarketplaceTransport | null>(null);
   const [makingOffer, setMakingOffer] = useState(false);
   const [selectedCarrierOffer, setSelectedCarrierOffer] = useState<CarrierOfferRow | null>(null);
-  useEffect(() => { setView(derive()); setSelected(null); setMakingOffer(false); setSelectedCarrierOffer(null); }, [loc.pathname]);
+  const routeState = loc.state as { job?: MarketplaceTransport; offer?: CarrierOfferRow } | null;
+  const isJobDetail = /^\/carrier\/jobs\/[^/]+/.test(loc.pathname);
+  const isOfferForm = /^\/carrier\/jobs\/[^/]+\/offer$/.test(loc.pathname);
+  const isOfferDetail = /^\/carrier\/offers\/[^/]+$/.test(loc.pathname);
+  useEffect(() => {
+    setView(derive());
+    setSelected(isJobDetail ? routeState?.job || null : null);
+    setMakingOffer(isOfferForm);
+    setSelectedCarrierOffer(isOfferDetail ? routeState?.offer || null : null);
+  }, [isJobDetail, isOfferDetail, isOfferForm, loc.pathname, routeState]);
   const go = (next: string, offerId?: string) => { setView(next); nav(next === "jobs" ? "/carrier" : `/carrier/${next}${offerId ? `?offer=${offerId}` : ""}`); };
-  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={setSelected} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onBack={() => setSelected(null)} onOffer={() => setMakingOffer(true)} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onBack={() => setMakingOffer(false)} onSent={offerId => go("messages", offerId)} />}{view === "offers" && !selectedCarrierOffer && <RealCarrierOffers initialTab={loc.pathname.includes("active") ? "active" : "offers"} onOpen={setSelectedCarrierOffer} />}{view === "offers" && selectedCarrierOffer && <CarrierOfferDetail offer={selectedCarrierOffer} onBack={() => setSelectedCarrierOffer(null)} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
+  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={job => nav(`/carrier/jobs/${job.id}`, { state: { job } })} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onOffer={() => nav(`/carrier/jobs/${selected.id}/offer`, { state: { job: selected } })} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onSent={offerId => go("messages", offerId)} />}{view === "offers" && !selectedCarrierOffer && <RealCarrierOffers initialTab={loc.pathname.includes("active") ? "active" : "offers"} onOpen={offer => nav(`/carrier/offers/${offer.id}`, { state: { offer } })} />}{view === "offers" && selectedCarrierOffer && <CarrierOfferDetail offer={selectedCarrierOffer} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
 }
 
 function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => void }) {
@@ -1752,12 +1762,12 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
   </section>;
 }
 
-function RealJobDetail({ request, onBack, onOffer }: { request: MarketplaceTransport; onBack: () => void; onOffer: () => void }) {
+function RealJobDetail({ request, onOffer }: { request: MarketplaceTransport; onOffer: () => void }) {
   const { t } = useLanguage();
-  return <section className="job-detail"><div className="job-detail-actions"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("Available transports")}</span></button><div className="job-detail-primary-actions"><a className="button ghost short" href={googleMapsDirectionsUrl(request.pickup, request.delivery)} target="_blank" rel="noreferrer">{t("Open in Google Maps")}</a>{request.myOffer ? <button className="edit-offer-quick" onClick={onOffer}><span>{t("Edit offer")}</span><OfferPrice priceCents={request.myOffer.priceCents} vatIncluded={request.myOffer.vatIncluded} className="compact" /></button> : <button className="button moss short" onClick={onOffer}>{t("Make an offer")} <Arrow /></button>}</div></div><TransportDetailHeader request={request} /><div className="job-layout single-column"><div><TransportDetails request={request} customerName={request.requesterName} /></div></div></section>;
+  return <section className="job-detail"><div className="job-detail-actions"><div className="job-detail-primary-actions"><a className="button ghost short" href={googleMapsDirectionsUrl(request.pickup, request.delivery)} target="_blank" rel="noreferrer">{t("Open in Google Maps")}</a>{request.myOffer ? <button className="edit-offer-quick" onClick={onOffer}><span>{t("Edit offer")}</span><OfferPrice priceCents={request.myOffer.priceCents} vatIncluded={request.myOffer.vatIncluded} className="compact" /></button> : <button className="button moss short" onClick={onOffer}>{t("Make an offer")} <Arrow /></button>}</div></div><TransportDetailHeader request={request} /><div className="job-layout single-column"><div><TransportDetails request={request} customerName={request.requesterName} /></div></div></section>;
 }
 
-function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransport; onBack: () => void; onSent: (offerId: string) => void }) {
+function RealMakeOffer({ request, onSent }: { request: MarketplaceTransport; onSent: (offerId: string) => void }) {
   const { t } = useLanguage();
   const initialVatIncluded = request.myOffer?.vatIncluded ?? true;
   const initialEnteredPriceCents = request.myOffer
@@ -1804,14 +1814,14 @@ function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransp
     }
     if (payload.offer) onSent(payload.offer.id);
   };
-  return <section className="make-offer"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("Job details")}</span></button><h1>{t("Your offer")}</h1><form noValidate onSubmit={submit}><label>{t("Price")}<span className="price-input">€<input inputMode="decimal" value={price} onChange={event => setPrice(event.target.value)} placeholder="0.00" required /></span></label><div className="vat-selection" role="radiogroup" aria-label={t("VAT treatment")}><button type="button" role="radio" aria-checked={vatIncluded} className={vatIncluded ? "selected" : ""} onClick={() => setVatIncluded(true)}>{t("VAT included")}</button><button type="button" role="radio" aria-checked={!vatIncluded} className={!vatIncluded ? "selected" : ""} onClick={() => setVatIncluded(false)}>{t("+ VAT")}</button></div>{priceBreakdown && <div className="offer-price-preview"><span>{t("Price the customer pays")}</span><OfferPrice priceCents={priceBreakdown.totalCents} vatIncluded={vatIncluded} /></div>}{requiredCreditsCents > 0 && !hasSufficientCredits && <div className="offer-credit-requirement"><span>{t("Add {amount} in credits to continue.", { amount: formatEuro(missingCreditsCents) })}</span><Link className="button dark short" to="/carrier/credits">{t("Add credits")}</Link></div>}<label>{t("Available date")}<input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={event => setDate(event.target.value)} required /></label><label>{t("Message")}<textarea required value={message} onChange={event => setMessage(event.target.value)} placeholder={t("Tell the customer anything useful about your offer.")} /></label>{error && <p className="transport-list-message error">{error}</p>}<button className="button moss full" disabled={saving || !hasSufficientCredits}>{saving ? t("Sending…") : `${t(request.myOffer ? "Update offer" : "Send offer")} (${formatEuro(requiredCreditsCents)})`} <Arrow /></button></form></section>;
+  return <section className="make-offer"><h1>{t("Your offer")}</h1><form noValidate onSubmit={submit}><label>{t("Price")}<span className="price-input">€<input inputMode="decimal" value={price} onChange={event => setPrice(event.target.value)} placeholder="0.00" required /></span></label><div className="vat-selection" role="radiogroup" aria-label={t("VAT treatment")}><button type="button" role="radio" aria-checked={vatIncluded} className={vatIncluded ? "selected" : ""} onClick={() => setVatIncluded(true)}>{t("VAT included")}</button><button type="button" role="radio" aria-checked={!vatIncluded} className={!vatIncluded ? "selected" : ""} onClick={() => setVatIncluded(false)}>{t("+ VAT")}</button></div>{priceBreakdown && <div className="offer-price-preview"><span>{t("Price the customer pays")}</span><OfferPrice priceCents={priceBreakdown.totalCents} vatIncluded={vatIncluded} /></div>}{requiredCreditsCents > 0 && !hasSufficientCredits && <div className="offer-credit-requirement"><span>{t("Add {amount} in credits to continue.", { amount: formatEuro(missingCreditsCents) })}</span><Link className="button dark short" to="/carrier/credits">{t("Add credits")}</Link></div>}<label>{t("Available date")}<input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={event => setDate(event.target.value)} required /></label><label>{t("Message")}<textarea required value={message} onChange={event => setMessage(event.target.value)} placeholder={t("Tell the customer anything useful about your offer.")} /></label>{error && <p className="transport-list-message error">{error}</p>}<button className="button moss full" disabled={saving || !hasSufficientCredits}>{saving ? t("Sending…") : `${t(request.myOffer ? "Update offer" : "Send offer")} (${formatEuro(requiredCreditsCents)})`} <Arrow /></button></form></section>;
 }
 
 type CarrierOfferRow = TransportOffer & { itemName: string; pickup: string; delivery: string; requesterName: string; transportStatus: TransportStatus; preferredDateFrom: string | null; preferredDateTo: string | null };
-function CarrierOfferDetail({ offer, onBack, onOpenChat }: { offer: CarrierOfferRow; onBack: () => void; onOpenChat: (offerId: string) => void }) {
+function CarrierOfferDetail({ offer, onOpenChat }: { offer: CarrierOfferRow; onOpenChat: (offerId: string) => void }) {
   const { language, t } = useLanguage();
   const statusTone = transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo);
-  return <section className="carrier-offer-detail"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("My offers")}</span></button><header><div><span className={`status large ${statusTone}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span><h1>{offer.itemName}</h1><TransportRoute from={offer.pickup} to={offer.delivery} short /></div><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-detail-price" /></header><div className="carrier-offer-facts"><div><span>{t("Customer")}</span><b>{offer.requesterName}</b></div><div><span>{t("Available date")}</span><b>{formatTransportDates(offer.availableDate, null, language)}</b></div></div><button className="button dark" onClick={() => onOpenChat(offer.id)}>{t("Open chat")}</button></section>;
+  return <section className="carrier-offer-detail"><header><div><span className={`status large ${statusTone}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span><h1>{offer.itemName}</h1><TransportRoute from={offer.pickup} to={offer.delivery} short /></div><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-detail-price" /></header><div className="carrier-offer-facts"><div><span>{t("Customer")}</span><b>{offer.requesterName}</b></div><div><span>{t("Available date")}</span><b>{formatTransportDates(offer.availableDate, null, language)}</b></div></div><button className="button dark" onClick={() => onOpenChat(offer.id)}>{t("Open chat")}</button></section>;
 }
 
 function RealCarrierOffers({ initialTab = "offers", onOpen }: { initialTab?: "offers" | "active"; onOpen: (offer: CarrierOfferRow) => void }) {
@@ -1950,13 +1960,11 @@ function VehicleManager({ vehicles, onChange }: { vehicles: CarrierVehicle[]; on
     else setError(t("Unable to remove vehicle"));
   };
   return <section className="vehicle-manager"><header><div><h2>{t("Vehicles")}</h2><span>{t("Add the vehicle data customers see on your profile")}</span></div><button type="button" className="button dark short" onClick={add}>{t("Add vehicle")}</button></header>
-    {vehicles.length ? vehicles.map(vehicle => <article key={vehicle.id}><div>▰</div><div><b>{vehicle.name}</b><small>{vehicle.sizeDescription}</small></div><button type="button" className="quiet-link" onClick={() => edit(vehicle)}>{t("Edit")}</button><button type="button" className="quiet-link danger" onClick={() => void remove(vehicle.id)}>{t("Remove")}</button></article>) : <p className="vehicle-empty-state">{t("No vehicles added yet")}</p>}
+    {vehicles.length ? vehicles.map(vehicle => <article key={vehicle.id}><div>▰</div><div><b>{vehicle.name}</b><small>{vehicle.sizeDescription}</small></div><div className="vehicle-actions"><button type="button" className="quiet-link" onClick={() => edit(vehicle)}>{t("Edit")}</button><button type="button" className="quiet-link danger" onClick={() => void remove(vehicle.id)}>{t("Remove")}</button></div></article>) : <p className="vehicle-empty-state">{t("No vehicles added yet")}</p>}
     {error && !dialogOpen && <p className="transport-list-message error">{error}</p>}
     {dialogOpen && <div className="vehicle-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}><section className="vehicle-dialog" role="dialog" aria-modal="true" aria-labelledby="vehicle-dialog-title"><button type="button" className="pickup-area-close vehicle-dialog-close" aria-label={t("Close")} onClick={closeDialog}>×</button><form onSubmit={save}><h3 id="vehicle-dialog-title">{editingId ? t("Edit vehicle") : t("Add vehicle")}</h3><label>{t("Vehicle name")}<input autoFocus value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} maxLength={120} required placeholder={t("e.g. Renault Master")} /></label><label>{t("Size and capacity")}<input value={draft.sizeDescription} onChange={event => setDraft(current => ({ ...current, sizeDescription: event.target.value }))} maxLength={250} required placeholder={t("e.g. Large van · 3.2m cargo length · 1,350kg payload")} /></label>{error && <p className="transport-list-message error">{error}</p>}<div className="vehicle-dialog-actions"><button type="button" className="quiet-link" disabled={saving} onClick={closeDialog}>{t("Cancel")}</button><button className="button moss short" disabled={saving}>{saving ? t("Saving…") : t("Save vehicle")}</button></div></form></section></div>}
   </section>;
 }
-function JobDetail({ onBack, onOffer }: { onBack: () => void; onOffer: () => void }) { const { t } = useLanguage(); return <section className="job-detail"><button className="back" onClick={onBack}>← {t("Available transports")}</button><header><div><p className="eyebrow">{t("Furniture")} · {t("Flexible")}</p><h1>{t("Bed slats")}</h1><p>IKEA Zagreb <i>→</i> Trešnjevka</p></div><b>12 km</b></header><div className="job-layout"><div><div className="detail-map"><RouteLine /><span>IKEA Zagreb</span><span>Trešnjevka</span></div><section><h2>{t("What you’re moving")}</h2><p>{t("Bed slats, already packed. No loading help required.")}</p><div className="photo-row"><ItemImage type="photo" /><ItemImage type="photo" /></div></section><section className="info-split"><div><span>{t("Pickup")}</span><b>{t("Flexible · Ground floor")}</b></div><div><span>{t("Delivery")}</span><b>{t("Trešnjevka · Elevator available")}</b></div></section></div><aside><p className="eyebrow">{t("Interested")}</p><h2>{t("Make a clear offer.")}</h2><p>{t("Tell the customer your price and when you can do it.")}</p><button className="button moss full" onClick={onOffer}>{t("Make an offer")} <Arrow /></button></aside></div><button className="button moss mobile-sticky" onClick={onOffer}>{t("Make an offer")}</button></section>; }
-function MakeOffer({ onBack, onSend }: { onBack: () => void; onSend: () => void }) { const { t } = useLanguage(); return <section className="make-offer"><button className="back" onClick={onBack}>← {t("Job details")}</button><p className="eyebrow">{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p><h1>{t("Your offer")}</h1><div><label className="price-input">€<input defaultValue="32" /></label><Picker label={t("Pickup availability")} defaultValue="today" options={[{ value: "today", label: <>{t("Today")}, 17:00–19:00</> }, { value: "tomorrow", label: t("Tomorrow, 10:00–12:00") }]} ariaLabel={t("Pickup availability")} /><Picker label={t("Delivery estimate")} defaultValue="45" options={[{ value: "45", label: t("Within 45 minutes of pickup") }, { value: "60", label: t("Within 1 hour of pickup") }]} ariaLabel={t("Delivery estimate")} /><Picker label={t("Vehicle")} defaultValue="master" options={[{ value: "master", label: <>Renault Master · {t("Large van")}</> }]} ariaLabel={t("Vehicle")} /><label>{t("Message")}<textarea required defaultValue={t("I’m already driving through this area tomorrow afternoon.")} /></label><button className="button moss full" onClick={onSend}>{t("Send offer")} <Arrow /></button></div></section>; }
 function MyOffers({ onOpen }: { onOpen: () => void }) { const { t } = useLanguage(); return <section className="my-offers"><div className="workspace-title"><div><p className="eyebrow">{t("Keep an eye on it")}</p><h1>{t("My offers")}</h1></div><div className="tabs"><button className="selected">{t("Pending")}</button><button>{t("Accepted")}</button><button>{t("Past")}</button></div></div><article><ItemImage /><div><h3>{t("Bed slats")}</h3><p>IKEA Zagreb → Trešnjevka</p></div><strong>€32</strong><span className="status">{t("You are ready - waiting for the customer")}</span><button className="button dark short" onClick={onOpen}>{t("Open")}</button></article></section>; }
 function ActiveDelivery({ stage, onNext, share, onShare }: { stage: number; onNext: () => void; share: boolean; onShare: () => void }) { const { t } = useLanguage(); const title = ["Heading to pickup", "At pickup", "Item collected", "On the way"][stage]; const action = ["I’ve arrived", "Item collected", "Start delivery", "Mark as delivered"][stage]; return <section className="active-delivery"><p className="eyebrow">{t("Active transport")}</p><h1>{t(title)}</h1><div className="active-meta"><div><span>{t("Customer")}</span><b>Ana Novak</b><a href="tel:+385915552400">+385 91 555 2400</a></div><div><span>{t("Route")}</span><b>IKEA Zagreb → Trešnjevka</b><button>{t("Open navigation")}</button></div></div><div className="active-map"><RouteLine /><i>●</i></div><div className="share"><div><b>{t("Share live location with customer")}</b><p>{t("Your customer will receive a private tracking link until delivery is completed.")}</p></div><button className={share ? "switch on" : "switch"} onClick={onShare}><span /></button></div><div className="update-buttons">{["Traffic", "Pickup delay", "Customer unavailable", "Other"].map(x => <button key={x}>{t(x)}</button>)}</div><button className="button moss delivery-action" onClick={onNext}>{t(action)}</button></section>; }
 function Wallet() {
@@ -2022,4 +2030,3 @@ function Wallet() {
   return <section className="wallet">{checkoutStatus === "success" && <p className="auth-message success">{t("Payment completed. Your balance will update as soon as Stripe confirms it.")}</p>}{checkoutStatus === "cancelled" && <p className="auth-message">{t("Checkout was cancelled. No credits were added.")}</p>}{error && <p className="transport-list-message error">{error}</p>}<div className="wallet-payment-layout"><aside className="balance-summary"><span>{t("Current balance")}</span><strong>{loading ? "-" : formatEuro(account?.balanceCents || 0)}</strong></aside><section className="checkout" aria-labelledby="add-credits-title"><div className="checkout-heading"><h2 id="add-credits-title">{t("Add credits")}</h2></div><label className="credit-amount-input"><span aria-hidden="true">€</span><input type="number" inputMode="decimal" min="5" max="500" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} aria-label={t("Custom amount")} /></label><div className="credit-presets" aria-label={t("Custom amount")}>{["5", "10", "25", "50"].map(value => <button type="button" className={amount === value ? "selected" : ""} aria-pressed={amount === value} key={value} onClick={() => setAmount(value)}>€{value}</button>)}</div><fieldset className="billing-recipient"><legend>{t("Invoice recipient")}</legend><div><label className={billingRecipient === "personal" ? "selected" : ""}><input type="radio" name="billing-recipient" checked={billingRecipient === "personal"} onChange={() => setBillingRecipient("personal")} /><span>{t("Private person")}</span></label><label className={billingRecipient === "company" ? "selected" : ""}><input type="radio" name="billing-recipient" checked={billingRecipient === "company"} onChange={() => setBillingRecipient("company")} /><span>{t("Company")}</span></label></div></fieldset>{billingRecipient === "company" && <div className="company-invoice-fields"><label>{t("Company legal name")}<input value={companyName} onChange={event => setCompanyName(event.target.value)} maxLength={150} autoComplete="organization" required /></label><label>{t("OIB")}<input value={companyOib} onChange={event => setCompanyOib(event.target.value)} inputMode="numeric" autoComplete="off" maxLength={16} required /></label><p className="field-hint">{t("We will add the company name and Croatian OIB to the Stripe invoice.")}</p></div>}<button type="button" className="button dark full" disabled={saving || !account?.stripeConfigured} onClick={() => void checkout()}>{saving ? t("Opening Stripe…") : `${t("Continue to Stripe")} · €${amount}`}</button>{!account?.stripeConfigured && !loading && <p className="field-hint">{t("Stripe needs to be configured before credits can be purchased.")}</p>}</section></div><p className="credit-explanation">{t("When a transport is confirmed by both sides, 5% of its agreed price is deducted from your credits.")}</p><article className="activity"><h2>{t("Recent activity")}</h2>{account?.transactions.length ? account.transactions.map(transaction => <div key={transaction.id}><span><b>{transaction.amountCents > 0 ? "+ " : "− "}{formatEuro(Math.abs(transaction.amountCents))}</b><small>{t(transaction.description)}</small>{transaction.invoicePdfUrl && <a className="invoice-link" href={transaction.invoicePdfUrl} target="_blank" rel="noreferrer">{t("Download invoice")}</a>}</span><time>{new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(transaction.createdAt))}</time></div>) : <p className="transport-list-message">{t("No credit activity yet")}</p>}</article></section>;
 }
 function CarrierProfile({ onVehicles }: { onVehicles: () => void }) { const { t } = useLanguage(); return <section className="carrier-profile"><div className="profile-head"><Avatar large /><div><p className="eyebrow">{t("Verified carrier")}</p><h1>Mario M.</h1><p>★ 4.9 · 127 {t("completed transports")}</p></div></div><p>{t("I’m an independent carrier in Zagreb. I care about being on time, communicating clearly, and delivering everything in the condition it left.")}</p><section><header><h2>{t("Vehicles")}</h2><button className="quiet-link" onClick={onVehicles}>{t("Manage")}</button></header><div className="vehicle">▰ <div><b>Renault Master</b><span>{t("Large Van")} · 3.2m {t("cargo length")} · 1,350kg {t("payload")}</span></div></div></section><section><h2>{t("Reviews")}</h2><blockquote>“{t("Mario was early, thoughtful and took great care with the furniture.")}”<footer>- Petra, {t("verified customer")}</footer></blockquote></section></section>; }
-function Vehicles({ onBack }: { onBack: () => void }) { const { t } = useLanguage(); return <section className="vehicles"><button className="back" onClick={onBack}>← {t("Carrier profile")}</button><header><div><p className="eyebrow">{t("Your equipment")}</p><h1>{t("Vehicles")}</h1></div><button className="button dark short">{t("Add vehicle")}</button></header><div className="vehicle manager">▰ <div><b>Renault Master</b><span>{t("Large Van")}</span><small>3.2m {t("cargo length")} · 1.7m {t("width")} · 1,350kg {t("payload")}</small></div><p><button>{t("Edit")}</button><button className="danger">{t("Remove")}</button></p></div></section>; }
