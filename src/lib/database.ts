@@ -201,6 +201,16 @@ async function ensureSchema() {
         )
       `;
       await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_requester_profile_photos (
+          id TEXT PRIMARY KEY,
+          requester_id TEXT NOT NULL UNIQUE REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          filename TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          image_data BYTEA NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`
         CREATE TABLE IF NOT EXISTS vanscout_transport_offers (
           id TEXT PRIMARY KEY,
           transport_request_id TEXT NOT NULL REFERENCES vanscout_transport_requests(id) ON DELETE CASCADE,
@@ -335,6 +345,37 @@ async function ensureSchema() {
 
 export async function ensureDatabaseSchema() {
   await ensureSchema();
+}
+
+export async function getRequesterProfilePhotoId(requesterId: string) {
+  await ensureSchema();
+  const rows = await database()`SELECT id FROM vanscout_requester_profile_photos WHERE requester_id = ${requesterId} LIMIT 1`;
+  return rows[0] ? String(rows[0].id) : null;
+}
+
+export async function updateRequesterProfilePhoto(requesterId: string, image: File) {
+  await ensureSchema();
+  const id = randomUUID();
+  const bytes = Buffer.from(await image.arrayBuffer());
+  await database()`
+    INSERT INTO vanscout_requester_profile_photos (id, requester_id, filename, content_type, image_data)
+    VALUES (${id}, ${requesterId}, ${image.name}, ${image.type}, ${bytes})
+    ON CONFLICT (requester_id) DO UPDATE SET
+      id = EXCLUDED.id,
+      filename = EXCLUDED.filename,
+      content_type = EXCLUDED.content_type,
+      image_data = EXCLUDED.image_data,
+      updated_at = NOW()
+  `;
+  return id;
+}
+
+export async function getRequesterProfilePhoto(requesterId: string) {
+  await ensureSchema();
+  const rows = await database()`SELECT content_type, image_data FROM vanscout_requester_profile_photos WHERE requester_id = ${requesterId} LIMIT 1`;
+  if (!rows[0]) return null;
+  const data = rows[0].image_data;
+  return { contentType: String(rows[0].content_type), data: Buffer.isBuffer(data) ? data : Buffer.from(data as Uint8Array) };
 }
 
 function toUser(row: Record<string, unknown>): AppUser {

@@ -734,7 +734,8 @@ export async function listMessages(offerId: string, userId: string, markRead = f
   if (!await canUseConversation(offerId, userId)) return null;
   const sql = sqlClient();
   const rows = await sql`
-    SELECT message.id, message.sender_id, sender.name AS sender_name, message.body, message.created_at
+    SELECT message.id, message.sender_id, sender.name AS sender_name, message.body, message.created_at,
+      message.created_at::text AS read_through
     FROM vanscout_messages message
     JOIN vanscout_users sender ON sender.id = message.sender_id
     WHERE message.offer_id = ${offerId}
@@ -742,7 +743,8 @@ export async function listMessages(offerId: string, userId: string, markRead = f
     LIMIT 500
   `;
   if (markRead && rows.length) {
-    const readThrough = rows[rows.length - 1].created_at;
+    // Keep PostgreSQL microseconds; the driver parses created_at as a millisecond Date.
+    const readThrough = rows[rows.length - 1].read_through;
     await sql`
       INSERT INTO vanscout_conversation_reads (offer_id, user_id, read_at)
       VALUES (${offerId}, ${userId}, ${readThrough})

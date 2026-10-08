@@ -306,7 +306,15 @@ function useHasMessages(kind?: "customer" | "carrier") {
       }
     };
     void load();
-    const handleMessagesRead = () => void load();
+    const handleMessagesRead = (event: Event) => {
+      const detail = (event as CustomEvent<{ hasUnreadMessages: boolean }>).detail;
+      if (detail) {
+        ++latestLoadRequest.current;
+        setHasMessages(detail.hasUnreadMessages);
+      } else {
+        void load();
+      }
+    };
     window.addEventListener("vanscout-messages-read", handleMessagesRead);
     void (async () => {
       try {
@@ -336,7 +344,7 @@ function useHasMessages(kind?: "customer" | "carrier") {
         realtimeClient = client;
         userChannelName = `user:${user.id}`;
         realtimeListener = message => {
-          if (message.name === "message-created") setHasMessages(true);
+          if (message.name === "message-created") void load();
         };
         await client.channels.get(userChannelName).subscribe(realtimeListener);
       } catch {
@@ -383,7 +391,7 @@ function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: stri
   const links = kind === "carrier"
     ? [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]]
     : [["requests", "Requests", "/customer"], ["messages", "Messages", "/customer/messages"], ["profile", "Profile", "/customer/profile"]];
-  const navigation = (inDrawer = false) => <nav aria-label={t("Navigation")}>{links.map(([key, label, href]) => <Link className={`${active === key ? "active" : ""} ${!inDrawer && kind === "customer" && key === "profile" ? "mobile-nav-link" : ""}`.trim()} aria-current={active === key ? "page" : undefined} key={key} to={href} onClick={inDrawer ? closeDrawer : undefined}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-label={t("Unread messages")} />}</Link>)}</nav>;
+  const navigation = (inDrawer = false) => <nav aria-label={t("Navigation")}>{links.map(([key, label, href]) => <Link className={active === key ? "active" : ""} aria-current={active === key ? "page" : undefined} key={key} to={href} onClick={inDrawer ? closeDrawer : undefined}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-label={t("Unread messages")} />}</Link>)}</nav>;
   return <header className={`topbar ${kind ? "app-topbar" : ""}`}>
     <Mark />{kind && navigation()}<HeaderActions kind={kind} />
     {kind && <>
@@ -1059,7 +1067,13 @@ function transportStatusLabel(status: TransportStatus, preferredDateFrom: string
 function transportStatusClass(status: TransportStatus, preferredDateFrom: string | null = null, preferredDateTo: string | null = null) {
   if (status === "completed") return "done";
   if (isTransportOverdue(status, preferredDateFrom, preferredDateTo)) return "overdue";
-  return status === "carrier_booked" ? "booked" : "";
+  return status === "carrier_booked" ? "booked" : "searching";
+}
+
+function conversationStatusLabel(conversation: Pick<Conversation, "status" | "selectedByCustomer">) {
+  if (conversation.status === "confirmed") return "Transport agreed";
+  if (conversation.status === "rejected") return "Not selected";
+  return conversation.selectedByCustomer ? "Selected for transport" : "In discussion";
 }
 
 function formatTransportDates(from: string, to: string | null, language: "en" | "hr") {
@@ -1167,7 +1181,7 @@ export function CustomerWorkspace() {
     return () => controller.abort();
   }, [filter, nav, reviewTransportId, t]);
 
-  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title"><div><h1>{t("Your transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => setSelectedTransport(request)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onBack={() => setSelectedTransport(null)} onOpenMessages={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
+  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title transport-workspace-title"><div><h1>{t("My transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => setSelectedTransport(request)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onBack={() => setSelectedTransport(null)} onOpenMessages={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
 }
 
 function RequestDetail({ request, onBack, onOpenMessages }: { request: TransportRequest; onBack: () => void; onOpenMessages: (offerId: string) => void }) {
@@ -1204,7 +1218,7 @@ function RequestDetail({ request, onBack, onOpenMessages }: { request: Transport
           <div className="offer-time"><b>{formatTransportDates(offer.availableDate, null, language)}</b><span>{t("Available date")}</span></div>
           {offer.message && <p>“{offer.message}”</p>}
           <div className="price"><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} /></div>
-          <div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="button dark short" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div>
+          <div className="offer-actions"><span className={`status ${offer.status === "confirmed" ? "booked" : ""}`}>{t(offer.status === "confirmed" ? "Transport agreed" : offer.selectedByCustomer ? "Your selected carrier" : offer.status === "rejected" ? "Not selected" : "Chat available")}</span><button className="quiet-link" onClick={() => onOpenMessages(offer.id)}>{t("Open chat")}</button></div>
         </article>)}</div>
       </aside>}
     </div>
@@ -1307,6 +1321,16 @@ function LiveMessages() {
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const ablyClient = useRef<Realtime | null>(null);
   const selectedIdRef = useRef("");
+  const conversationsRef = useRef<Conversation[]>([]);
+  const latestConversationRequest = useRef(0);
+  const latestMessageRequest = useRef(0);
+  const updateConversations = useCallback((next: Conversation[]) => {
+    conversationsRef.current = next;
+    setConversations(next);
+    window.dispatchEvent(new CustomEvent("vanscout-messages-read", {
+      detail: { hasUnreadMessages: next.some(conversation => conversation.hasUnreadMessages) },
+    }));
+  }, []);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const selected = conversations.find(conversation => conversation.offerId === selectedId) || null;
   const conversationIds = useMemo(() => conversations.map(conversation => conversation.offerId).sort().join(","), [conversations]);
@@ -1320,45 +1344,64 @@ function LiveMessages() {
   const loadConversations = useCallback(async () => {
     const token = getAuthToken();
     if (!token) return;
+    const requestId = ++latestConversationRequest.current;
     try {
-      const response = await fetch("/api/conversations", { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch("/api/conversations", { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
       const payload = await response.json() as { conversations?: Conversation[]; error?: string };
+      if (requestId !== latestConversationRequest.current) return;
       if (!response.ok) throw new Error(payload.error || t("Unable to load messages"));
       const next = payload.conversations || [];
-      setConversations(next);
+      updateConversations(next);
       setDesktopSelectedId(current => next.some(conversation => conversation.offerId === current) ? current : next[0]?.offerId || "");
       setError("");
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t("Unable to load messages"));
+      if (requestId === latestConversationRequest.current) setError(loadError instanceof Error ? loadError.message : t("Unable to load messages"));
     }
-  }, [t]);
+  }, [t, updateConversations]);
 
-  const loadMessages = useCallback(async (offerId: string, markRead = false) => {
+  const loadMessages = useCallback(async (offerId: string) => {
     const token = getAuthToken();
     if (!token || !offerId) return;
+    const markRead = document.visibilityState === "visible";
+    const requestId = ++latestMessageRequest.current;
     try {
       const response = await fetch(`/api/conversations/${offerId}/messages${markRead ? "?markRead=true" : ""}`, { cache: "no-store", headers: { Authorization: `Bearer ${token}` } });
       const payload = await response.json() as { messages?: ChatMessage[]; userId?: string; error?: string };
+      if (selectedIdRef.current !== offerId || requestId !== latestMessageRequest.current) return;
       if (!response.ok) throw new Error(payload.error || t("Unable to load messages"));
-      if (selectedIdRef.current !== offerId) return;
       setMessages(payload.messages || []);
       setUserId(payload.userId || "");
       setError("");
       if (markRead) {
-        setConversations(current => current.map(conversation => conversation.offerId === offerId ? { ...conversation, hasUnreadMessages: false } : conversation));
-        window.dispatchEvent(new Event("vanscout-messages-read"));
+        // Ignore inbox responses started before this read was saved.
+        ++latestConversationRequest.current;
+        updateConversations(conversationsRef.current.map(conversation => conversation.offerId === offerId ? { ...conversation, hasUnreadMessages: false } : conversation));
+        void loadConversations();
       }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t("Unable to load messages"));
+      if (selectedIdRef.current === offerId && requestId === latestMessageRequest.current) setError(loadError instanceof Error ? loadError.message : t("Unable to load messages"));
     }
-  }, [t]);
+  }, [t, updateConversations, loadConversations]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
+    ++latestMessageRequest.current;
     setMessages([]);
     setNote("");
     if (selectedId) void loadMessages(selectedId);
   }, [selectedId, loadMessages]);
+
+  useEffect(() => {
+    const readVisibleConversation = () => {
+      if (document.visibilityState === "visible" && selectedIdRef.current) void loadMessages(selectedIdRef.current);
+    };
+    document.addEventListener("visibilitychange", readVisibleConversation);
+    window.addEventListener("focus", readVisibleConversation);
+    return () => {
+      document.removeEventListener("visibilitychange", readVisibleConversation);
+      window.removeEventListener("focus", readVisibleConversation);
+    };
+  }, [loadMessages]);
 
   useEffect(() => {
     void loadConversations();
@@ -1515,12 +1558,12 @@ function LiveMessages() {
     <header><h1>{t("Messages")}</h1></header>
     {error && <p className="transport-list-message error">{error}</p>}
     {!conversations.length ? <div className="empty-transports"><h2>{t("No conversations yet")}</h2><p>{t("A conversation opens as soon as a carrier sends an offer.")}</p></div> : <div className="messages live-messages">
-      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => openConversation(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.companyName || conversation.otherPartyName}</b><small>{conversation.status === "confirmed" ? t("Transport agreed") : conversation.selectedByCustomer ? t("Selected for transport") : conversation.lastMessage || conversation.itemName}</small></span>{conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</button>)}</aside>
+      <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => openConversation(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.otherPartyName}</b><small>{t(conversationStatusLabel(conversation))}</small></span>{mobile ? <span className="conversation-meta"><span className="offer-tag conversation-price"><OfferPrice priceCents={conversation.priceCents} vatIncluded={conversation.vatIncluded} /></span>{conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</span> : conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</button>)}</aside>
       {selected && <article>
-        <header><button type="button" className="mobile-chat-back" aria-label={t("Back to messages")} onClick={backToConversations}><BackIcon /></button><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div><span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span></header>
-        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <div className="contact-note contact-revealed deal-contact"><b>{t("Contact details unlocked")}</b>{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div>}</div>
+        <header><button type="button" className="mobile-chat-back" aria-label={t("Back to messages")} onClick={backToConversations}><BackIcon /></button><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div>{!mobile && <span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span>}</header>
+        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <>{mobile && <b className="mobile-contact-status">{t("Contact details unlocked")}</b>}<div className="contact-note contact-revealed deal-contact">{!mobile && <b>{t("Contact details unlocked")}</b>}{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div></>}</div>
         <div className="thread" ref={threadRef}>{selected.offerMessage && <p className={`bubble ${selected.role === "transporter" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}</div>
-        {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <>{selected.status === "pending" && <p className="contact-note compose-contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p>}<form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} onFocus={() => void loadMessages(selected.offerId, true)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form></>}
+        {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <>{selected.status === "pending" && <p className="contact-note compose-contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p>}<form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form></>}
       </article>}
     </div>}
   </section>;
@@ -1551,16 +1594,33 @@ function DeleteAccountControl() {
 
 function CustomerProfile() {
   const { t } = useLanguage();
-  const [profile, setProfile] = useState<{ name: string; email: string; phoneNumber: string | null } | null>(null);
+  const [profile, setProfile] = useState<{ name: string; email: string; phoneNumber: string | null; profileImageId: string | null } | null>(null);
+  const [profileImage, setProfileImage] = useState<File | null>(null);
+  const [error, setError] = useState("");
   useEffect(() => {
     void fetch("/api/me/profile", { cache: "no-store" }).then(async response => {
       if (!response.ok) throw new Error();
-      const payload = await response.json() as { data?: { profile?: { name: string; email: string; phoneNumber: string | null } } };
+      const payload = await response.json() as { data?: { profile?: { name: string; email: string; phoneNumber: string | null; profileImageId: string | null } } };
       setProfile(payload.data?.profile || null);
     }).catch(() => setProfile(null));
   }, []);
+  const changePhoto = async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/") || file.size > 10 * 1024 * 1024) { setError(t("Choose image files up to 10 MB each")); return; }
+    setProfileImage(file); setError("");
+    const token = getAuthToken();
+    if (!token) return;
+    const form = new FormData(); form.set("profileImage", file);
+    try {
+      const response = await fetch("/api/me/profile", { method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: form });
+      const payload = await response.json() as { profileImageId?: string; error?: string };
+      if (!response.ok || !payload.profileImageId) throw new Error(payload.error || t("Unable to save profile"));
+      setProfile(current => current ? { ...current, profileImageId: payload.profileImageId! } : current);
+      setProfileImage(null);
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : t("Unable to save profile")); }
+  };
   const initials = profile?.name.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="profile-page"><p className="eyebrow">{t("Account")}</p><h1>{t("Your profile")}</h1><div className="profile-head"><span className="avatar customer large">{initials}</span><div><h2>{profile?.name || "-"}</h2><p>{profile ? `${profile.email}${profile.phoneNumber ? ` · ${profile.phoneNumber}` : ""}` : t("Loading profile…")}</p><DeleteAccountControl /></div></div></section>;
+  return <section className="profile-page real-requester-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { void changePhoto(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar customer large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.name || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/me/profile/image?v=${profile.profileImageId}`} alt={profile.name} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.name || t("Your profile")}</h1><div className="profile-stats">{profile ? <><span>{profile.email}</span>{profile.phoneNumber && <span>{profile.phoneNumber}</span>}</> : <span>{t("Loading profile…")}</span>}</div></div></div>{error && <p className="transport-list-message error" role="alert">{error}</p>}<DeleteAccountControl /></section>;
 }
 function Review({ onDone }: { onDone: () => void }) { const { t } = useLanguage(); const [rating, setRating] = useState(5); return <section className="review"><p className="eyebrow">{t("Transport complete")}</p><h1>{t("How did it go?")}</h1><div className="profile-head"><Avatar large /><div><h2>Mario M.</h2><p>{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p></div></div><div className="stars">{[1,2,3,4,5].map(n => <button className={n <= rating ? "on" : ""} onClick={() => setRating(n)} key={n}>★</button>)}</div><div className="tags">{["On time", "Great communication", "Careful handling", "Friendly"].map(x => <button key={x}>{t(x)}</button>)}</div><label><textarea placeholder={t("Add a short comment (optional)")} /></label><button className="button moss" onClick={onDone}>{t("Submit review")}</button></section>; }
 export function Tracking() { const { t } = useLanguage(); return <div className="tracking"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /><span>{t("Private delivery tracking")}</span></div></header><main><p className="eyebrow">{t("Bed slats")} · 12 km</p><h1>{t("Your delivery is on the way.")}</h1><div className="tracking-map"><RouteLine /><i>●</i><b className="map-pickup">{t("From")}: IKEA Zagreb</b><b className="map-delivery">{t("To")}: Trešnjevka</b></div><section className="eta"><div><Avatar /><span><b>Mario M.</b><small>Renault Master</small></span></div><div><span>{t("Estimated arrival")}</span><b>18:42</b></div></section><div className="transport-steps tracking-list"><div className="done"><b>✓</b><span><strong>{t("Picked up")}</strong><small>{t("17:28 - Mario has your item.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("In transit")}</strong><small>{t("18:04 - Heavy traffic. ETA updated by 12 minutes.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("We’ll let you know when it arrives.")}</small></span></div></div></main></div>; }
@@ -1572,9 +1632,10 @@ export function CarrierWorkspace() {
   const [view, setView] = useState(derive());
   const [selected, setSelected] = useState<MarketplaceTransport | null>(null);
   const [makingOffer, setMakingOffer] = useState(false);
-  useEffect(() => { setView(derive()); setSelected(null); setMakingOffer(false); }, [loc.pathname]);
+  const [selectedCarrierOffer, setSelectedCarrierOffer] = useState<CarrierOfferRow | null>(null);
+  useEffect(() => { setView(derive()); setSelected(null); setMakingOffer(false); setSelectedCarrierOffer(null); }, [loc.pathname]);
   const go = (next: string, offerId?: string) => { setView(next); nav(next === "jobs" ? "/carrier" : `/carrier/${next}${offerId ? `?offer=${offerId}` : ""}`); };
-  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={setSelected} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onBack={() => setSelected(null)} onOffer={() => setMakingOffer(true)} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onBack={() => setMakingOffer(false)} onSent={offerId => go("messages", offerId)} />}{view === "offers" && <RealCarrierOffers initialTab={loc.pathname.includes("active") ? "active" : "offers"} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
+  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={setSelected} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onBack={() => setSelected(null)} onOffer={() => setMakingOffer(true)} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onBack={() => setMakingOffer(false)} onSent={offerId => go("messages", offerId)} />}{view === "offers" && !selectedCarrierOffer && <RealCarrierOffers initialTab={loc.pathname.includes("active") ? "active" : "offers"} onOpen={setSelectedCarrierOffer} />}{view === "offers" && selectedCarrierOffer && <CarrierOfferDetail offer={selectedCarrierOffer} onBack={() => setSelectedCarrierOffer(null)} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
 }
 
 function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => void }) {
@@ -1686,7 +1747,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
       </div>
     </div>
     {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Pickup area")}><div className="pickup-area-radius"><label className="job-filter-field job-distance-filter"><span><span>{t("Pickup radius")}</span><strong>{t("Within {distance} km", { distance: draftPickupRadius })}</strong></span><input type="range" min="5" max={MAX_PICKUP_RADIUS_KM} step="5" value={draftPickupRadius} onChange={event => setDraftPickupRadius(Number(event.target.value))} aria-valuetext={t("Within {distance} km", { distance: draftPickupRadius })} /></label><button type="button" className="pickup-area-close pickup-area-radius-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close pickup area map")}>×</button></div><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={draftPickupArea} onChange={setDraftPickupArea} showSearch={false} showCurrentLocation={false} radiusKm={draftPickupRadius} /><div className="pickup-area-actions">{draftPickupArea && <button type="button" className="quiet-link" onClick={clearPickupArea}>{t("Clear location")}</button>}<button type="button" className="button moss pickup-area-apply" onClick={applyPickupArea}>{t("Apply")}</button></div></section></div>}
-    {loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}
+    {loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? <div className="transport-data-list">{filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>)}</div> : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}
     {hasMore && <button type="button" className="button dark load-more-transports" disabled={loadingMore} onClick={loadMore}>{loadingMore ? t("Loading more…") : t("Load more")}</button>}
   </section>;
 }
@@ -1747,7 +1808,13 @@ function RealMakeOffer({ request, onBack, onSent }: { request: MarketplaceTransp
 }
 
 type CarrierOfferRow = TransportOffer & { itemName: string; pickup: string; delivery: string; requesterName: string; transportStatus: TransportStatus; preferredDateFrom: string | null; preferredDateTo: string | null };
-function RealCarrierOffers({ initialTab = "offers", onOpenChat }: { initialTab?: "offers" | "active"; onOpenChat?: (offerId: string) => void }) {
+function CarrierOfferDetail({ offer, onBack, onOpenChat }: { offer: CarrierOfferRow; onBack: () => void; onOpenChat: (offerId: string) => void }) {
+  const { language, t } = useLanguage();
+  const statusTone = transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo);
+  return <section className="carrier-offer-detail"><button className="back detail-back" onClick={onBack}><BackIcon /><span>{t("My offers")}</span></button><header><div><span className={`status large ${statusTone}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span><h1>{offer.itemName}</h1><TransportRoute from={offer.pickup} to={offer.delivery} short /></div><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-detail-price" /></header><div className="carrier-offer-facts"><div><span>{t("Customer")}</span><b>{offer.requesterName}</b></div><div><span>{t("Available date")}</span><b>{formatTransportDates(offer.availableDate, null, language)}</b></div></div><button className="button dark" onClick={() => onOpenChat(offer.id)}>{t("Open chat")}</button></section>;
+}
+
+function RealCarrierOffers({ initialTab = "offers", onOpen }: { initialTab?: "offers" | "active"; onOpen: (offer: CarrierOfferRow) => void }) {
   const { language, t } = useLanguage();
   const [offers, setOffers] = useState<CarrierOfferRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1764,7 +1831,7 @@ function RealCarrierOffers({ initialTab = "offers", onOpenChat }: { initialTab?:
       setOffers(payload.offers || []);
     }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load offers"))).finally(() => setLoading(false));
   }, [tab, t]);
-  return <section className="my-offers"><div className="workspace-title"><div><h1>{t("My offers")}</h1></div><div className="tabs" role="group" aria-label={t("My offers")}><button className={tab === "offers" ? "selected" : ""} aria-pressed={tab === "offers"} onClick={() => setTab("offers")}>{t("My offers")}</button><button className={tab === "active" ? "selected" : ""} aria-pressed={tab === "active"} onClick={() => setTab("active")}>{t("Active transports")}</button></div></div>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : offers.length ? offers.map(offer => <article className={onOpenChat ? "list-item-link" : ""} key={offer.id} role={onOpenChat ? "button" : undefined} tabIndex={onOpenChat ? 0 : undefined} aria-label={onOpenChat ? `${t("Open chat")}: ${offer.itemName}` : undefined} onClick={() => onOpenChat?.(offer.id)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (onOpenChat && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenChat(offer.id); } }}><ItemImage label={offer.itemName} /><div><h3>{offer.itemName}</h3><TransportRoute from={offer.pickup} to={offer.delivery} short /><small>{offer.requesterName} · {formatTransportDates(offer.availableDate, null, language)}</small></div><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-price" /><span className={`status list-item-status ${transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo)}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span></article>) : <div className="empty-transports"><h2>{t(tab === "active" ? "No active transports" : "No offers yet")}</h2><p>{t(tab === "active" ? "Mutually agreed transports will appear here." : "Offers you send to customers will appear here.")}</p></div>}</section>;
+  return <section className="my-offers"><div className="workspace-title"><div><h1>{t("My offers")}</h1></div><div className="tabs" role="group" aria-label={t("My offers")}><button className={tab === "offers" ? "selected" : ""} aria-pressed={tab === "offers"} onClick={() => setTab("offers")}>{t("My offers")}</button><button className={tab === "active" ? "selected" : ""} aria-pressed={tab === "active"} onClick={() => setTab("active")}>{t("Active transports")}</button></div></div>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : offers.length ? offers.map(offer => <article className="list-item-link" key={offer.id} role="button" tabIndex={0} aria-label={`${t("View offer")}: ${offer.itemName}`} onClick={() => onOpen(offer)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(offer); } }}><ItemImage label={offer.itemName} /><div className="carrier-offer-details"><h3 title={offer.itemName}>{offer.itemName}</h3><TransportRoute from={offer.pickup} to={offer.delivery} short /><small>{offer.requesterName} · {formatTransportDates(offer.availableDate, null, language)}</small></div><div className="carrier-offer-summary"><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-price" /><span className={`status list-item-status ${transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo)}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span></div></article>) : <div className="empty-transports"><h2>{t(tab === "active" ? "No active transports" : "No offers yet")}</h2><p>{t(tab === "active" ? "Mutually agreed transports will appear here." : "Offers you send to customers will appear here.")}</p></div>}</section>;
 }
 
 function CarrierProfileEditor() {
