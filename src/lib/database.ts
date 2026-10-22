@@ -165,6 +165,19 @@ async function ensureSchema() {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_push_subscriptions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          endpoint TEXT NOT NULL UNIQUE,
+          p256dh TEXT NOT NULL,
+          auth TEXT NOT NULL,
+          expiration_time DOUBLE PRECISION,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_push_subscriptions_user_idx ON vanscout_push_subscriptions (user_id)`;
       // Existing databases retain the old 5,000 km constraint after CREATE TABLE
       // IF NOT EXISTS. Cap saved values before tightening the check constraint.
       await sql`UPDATE vanscout_carrier_search_preferences SET pickup_radius_km = 3000 WHERE pickup_radius_km > 3000`;
@@ -335,6 +348,55 @@ async function ensureSchema() {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_conversation_reads_user_idx ON vanscout_conversation_reads (user_id)`;
+      // A carrier ride is a capacity listing, not an individual customer transport.
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_rides (
+          id TEXT PRIMARY KEY,
+          carrier_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          pickup_formatted TEXT NOT NULL,
+          delivery_formatted TEXT NOT NULL,
+          departure_date DATE NOT NULL,
+          departure_time TIME NOT NULL,
+          capacity TEXT NOT NULL CHECK (LENGTH(capacity) BETWEEN 1 AND 500),
+          active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_rides_carrier_created_idx ON vanscout_carrier_rides (carrier_id, created_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_rides_active_date_idx ON vanscout_carrier_rides (active, departure_date, departure_time)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_ride_inquiries (
+          id TEXT PRIMARY KEY,
+          carrier_ride_id TEXT NOT NULL REFERENCES vanscout_carrier_rides(id) ON DELETE CASCADE,
+          requester_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          message TEXT NOT NULL CONSTRAINT vanscout_carrier_ride_inquiries_message_check CHECK (LENGTH(message) BETWEEN 1 AND 10000),
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'closed')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (carrier_ride_id, requester_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_ride_inquiries_requester_idx ON vanscout_carrier_ride_inquiries (requester_id, updated_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_ride_messages (
+          id TEXT PRIMARY KEY,
+          inquiry_id TEXT NOT NULL REFERENCES vanscout_carrier_ride_inquiries(id) ON DELETE CASCADE,
+          sender_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          body TEXT NOT NULL CONSTRAINT vanscout_carrier_ride_messages_body_check CHECK (LENGTH(body) BETWEEN 1 AND 10000),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_ride_messages_inquiry_created_idx ON vanscout_carrier_ride_messages (inquiry_id, created_at ASC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_carrier_ride_conversation_reads (
+          inquiry_id TEXT NOT NULL REFERENCES vanscout_carrier_ride_inquiries(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
+          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (inquiry_id, user_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_ride_conversation_reads_user_idx ON vanscout_carrier_ride_conversation_reads (user_id)`;
     }).catch(error => {
       schemaReady = null;
       throw error;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
 import { InsufficientCreditsError, listMessages, sendMessage } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
+import { sendPushNotification } from "@/lib/push";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { RestrictedContactDetailsError } from "@/lib/contact-details";
 
@@ -32,6 +33,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await Promise.all([
       publishRealtimeEvent(`chat:${id}`, "message-created", { messageId: message.id }),
       publishRealtimeEvent(`user:${message.recipientId}`, "message-created", { offerId: id, messageId: message.id }),
+      sendPushNotification(message.recipientId, {
+        title: "VanScout",
+        body: "You have a new message.",
+        url: user.role === "transporter" ? "/customer/messages" : "/carrier/messages",
+        tag: `message-${id}`,
+      }),
     ]);
     return NextResponse.json({ message }, { status: 201 });
   } catch (error) {

@@ -8,6 +8,7 @@ import type { TransportStatus } from "./transport-types";
 import { sendTransportReviewEmail } from "./mailer";
 import { optionalEnv } from "./config";
 import type { CarrierReview, CarrierVehicle } from "./marketplace-types";
+import { listRideInquiryMessages, sendRideInquiryMessage } from "./carrier-rides";
 
 function iso(value: unknown) {
   const parsed = value instanceof Date ? value : new Date(String(value));
@@ -677,9 +678,10 @@ export async function listConversations(user: AppUser): Promise<Conversation[]> 
     WHERE ($1 = offer.carrier_id OR $1 = tr.requester_id)
     ORDER BY COALESCE(latest.created_at, offer.updated_at) DESC
   `, [user.id]);
-  return rows.map(raw => {
+  const offerConversations = rows.map(raw => {
     const row = raw as Record<string, unknown>;
     return {
+      type: "offer" as const,
       offerId: String(row.offer_id),
       transportId: String(row.transport_id),
       itemName: String(row.item_name),
@@ -704,6 +706,67 @@ export async function listConversations(user: AppUser): Promise<Conversation[]> 
       lastMessageAt: row.last_message_at ? iso(row.last_message_at) : null,
       hasUnreadMessages: Boolean(row.has_unread_messages),
     };
+  });
+  const rideRows = await sql.query(`
+    SELECT inquiry.id AS inquiry_id, ride.id AS ride_id, ride.pickup_formatted, ride.delivery_formatted,
+      ride.departure_date, ride.departure_time, ride.capacity,
+      inquiry.message AS inquiry_message, inquiry.status AS inquiry_status, inquiry.updated_at,
+      CASE WHEN $1 = inquiry.requester_id THEN carrier.name ELSE requester.name END AS other_party_name,
+      CASE WHEN $1 = inquiry.requester_id THEN carrier.avatar_url ELSE requester.avatar_url END AS other_party_avatar_url,
+      CASE WHEN $1 = inquiry.requester_id THEN (SELECT photo.id FROM vanscout_carrier_profile_photos photo WHERE photo.carrier_id = carrier.id) ELSE NULL END AS other_party_profile_image_id,
+      profile.company_name,
+      latest.body AS last_message, latest.created_at AS last_message_at,
+      EXISTS (
+        SELECT 1 FROM vanscout_carrier_ride_messages unread
+        WHERE unread.inquiry_id = inquiry.id AND unread.sender_id <> $1
+          AND unread.created_at > COALESCE(read_state.read_at, TIMESTAMPTZ 'epoch')
+      ) AS has_unread_messages
+    FROM vanscout_carrier_ride_inquiries inquiry
+    JOIN vanscout_carrier_rides ride ON ride.id = inquiry.carrier_ride_id
+    JOIN vanscout_users carrier ON carrier.id = ride.carrier_id
+    JOIN vanscout_users requester ON requester.id = inquiry.requester_id
+    LEFT JOIN vanscout_carrier_profiles profile ON profile.carrier_id = carrier.id
+    LEFT JOIN vanscout_carrier_ride_conversation_reads read_state ON read_state.inquiry_id = inquiry.id AND read_state.user_id = $1
+    LEFT JOIN LATERAL (
+      SELECT message.body, message.created_at FROM vanscout_carrier_ride_messages message
+      WHERE message.inquiry_id = inquiry.id ORDER BY message.created_at DESC LIMIT 1
+    ) latest ON TRUE
+    WHERE $1 = inquiry.requester_id OR $1 = ride.carrier_id
+  `, [user.id]);
+  const rideConversations: Conversation[] = rideRows.map(raw => {
+    const row = raw as Record<string, unknown>;
+    const route = `${String(row.pickup_formatted)} → ${String(row.delivery_formatted)}`;
+    return {
+      type: "ride_inquiry",
+      offerId: String(row.inquiry_id),
+      transportId: String(row.ride_id),
+      itemName: route,
+      otherPartyName: String(row.other_party_name),
+      otherPartyAvatarUrl: typeof row.other_party_avatar_url === "string" ? row.other_party_avatar_url : null,
+      otherPartyProfileImageId: typeof row.other_party_profile_image_id === "string" ? row.other_party_profile_image_id : null,
+      companyName: typeof row.company_name === "string" ? row.company_name : "",
+      priceCents: 0,
+      vatIncluded: true,
+      availableDate: dateOnly(row.departure_date) || "",
+      offerMessage: typeof row.inquiry_message === "string" ? decryptMessage(row.inquiry_message) : "",
+      role: user.role,
+      status: String(row.inquiry_status) === "closed" ? "rejected" : "pending",
+      selectedByCustomer: false,
+      carrierAgreed: false,
+      confirmedAt: null,
+      commissionCents: 0,
+      carrierBalanceCents: 0,
+      otherPartyEmail: null,
+      otherPartyPhone: null,
+      lastMessage: typeof row.last_message === "string" ? decryptMessage(row.last_message) : null,
+      lastMessageAt: row.last_message_at ? iso(row.last_message_at) : null,
+      hasUnreadMessages: Boolean(row.has_unread_messages),
+    };
+  });
+  return [...offerConversations, ...rideConversations].sort((left, right) => {
+    const leftAt = left.lastMessageAt || (left.type === "offer" ? left.availableDate : "");
+    const rightAt = right.lastMessageAt || (right.type === "offer" ? right.availableDate : "");
+    return rightAt.localeCompare(leftAt);
   });
 }
 
@@ -731,7 +794,7 @@ async function canUseConversation(offerId: string, userId: string, requireWritab
 
 export async function listMessages(offerId: string, userId: string, markRead = false): Promise<ChatMessage[] | null> {
   await ensureDatabaseSchema();
-  if (!await canUseConversation(offerId, userId)) return null;
+  if (!await canUseConversation(offerId, userId)) return offerId.startsWith("ride_") ? listRideInquiryMessages(offerId, userId, markRead) : null;
   const sql = sqlClient();
   const rows = await sql`
     SELECT message.id, message.sender_id, sender.name AS sender_name, message.body, message.created_at,
@@ -769,7 +832,7 @@ export async function sendMessage(offerId: string, senderId: string, body: strin
       AND (${senderId} = offer.carrier_id OR ${senderId} = tr.requester_id)
     LIMIT 1
   `;
-  if (!access[0]) return null;
+  if (!access[0]) return offerId.startsWith("ride_") ? sendRideInquiryMessage(offerId, senderId, body) : null;
   if (String(access[0].status) === "pending" && hasRestrictedContactDetails(body)) {
     throw new RestrictedContactDetailsError();
   }

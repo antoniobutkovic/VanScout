@@ -5,6 +5,7 @@ import { optionalEnv } from "@/lib/config";
 import { stripeClient } from "@/lib/stripe";
 import { finalizeReadyOffersForCarrier, listTransportDealTargets } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
+import { sendPushNotification } from "@/lib/push";
 
 function paymentIntentId(session: Stripe.Checkout.Session) {
   return typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id || null;
@@ -69,6 +70,12 @@ export async function POST(request: Request) {
               publishRealtimeEvent(`chat:${target.offerId}`, "deal-updated", { offerId: target.offerId }),
               publishRealtimeEvent(`user:${target.carrierId}`, "deal-updated", { offerId: target.offerId }),
             ]),
+            sendPushNotification(deal.requesterId, {
+              title: "VanScout",
+              body: "Your transporter has confirmed the transport.",
+              url: "/customer/messages",
+              tag: `transport-deal-${deal.transportId}`,
+            }),
           ]);
         }
       }

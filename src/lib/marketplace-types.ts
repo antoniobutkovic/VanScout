@@ -57,6 +57,7 @@ export type CarrierReview = {
 };
 
 export type Conversation = {
+  type: "offer" | "ride_inquiry";
   offerId: string;
   transportId: string;
   itemName: string;

@@ -1,5 +1,18 @@
 # VanScout
 
+## Web push notifications
+
+VanScout uses standard Web Push for messages, offers, agreement updates, and newly published transports matching a carrier's saved filters. Generate one persistent VAPID key pair and configure these variables in every deployed environment:
+
+```bash
+npx web-push generate-vapid-keys
+VAPID_SUBJECT=mailto:notifications@your-domain.example
+VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+```
+
+Users enable notifications from their profile. On iPhone and iPad, they must first add VanScout to the Home Screen.
+
 VanScout includes the existing Kotlin Multiplatform mobile client in `mobile/`
 and a Next.js full-stack web application at the repository root. The browser UI
 and API run on the same origin, matching the CraftLog/Avero deployment model.

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
+import { findCarrierIdsWithMatchingSearchPreferences } from "@/lib/carrier-search-preferences";
+import { sendPushNotification } from "@/lib/push";
 import { createTransportRequest, listTransportRequests } from "@/lib/transports";
 import { completeDueTransports } from "@/lib/marketplace";
 
@@ -46,7 +48,20 @@ export async function POST(request: Request) {
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid transport request" }, { status: 400 });
   try {
-    return NextResponse.json({ transport: await createTransportRequest(user.id, parsed.data) }, { status: 201 });
+    const transport = await createTransportRequest(user.id, parsed.data);
+    try {
+      const carrierIds = await findCarrierIdsWithMatchingSearchPreferences(transport);
+      await Promise.all(carrierIds.map(carrierId => sendPushNotification(carrierId, {
+        title: "New matching transport",
+        body: `${transport.itemName}: ${transport.pickup.formatted} → ${transport.delivery.formatted}`,
+        url: "/carrier",
+        tag: `transport-${transport.id}`,
+      })));
+    } catch (notificationError) {
+      // Publishing a transport must not fail when push delivery is temporarily unavailable.
+      console.warn("Unable to notify carriers about a matching transport", notificationError);
+    }
+    return NextResponse.json({ transport }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Unable to publish transport" }, { status: 500 });
   }

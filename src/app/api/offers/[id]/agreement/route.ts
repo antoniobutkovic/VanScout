@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticatedUser } from "@/lib/request-auth";
 import { agreeToOffer, InsufficientCreditsError, listTransportDealTargets, selectOfferForTransport } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
+import { sendPushNotification } from "@/lib/push";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await authenticatedUser(request);
@@ -19,6 +20,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         publishRealtimeEvent(`chat:${target.offerId}`, "deal-updated", { offerId: target.offerId }),
         publishRealtimeEvent(`user:${target.carrierId}`, "deal-updated", { offerId: target.offerId }),
       ]),
+      sendPushNotification(user.role === "requester" ? deal.carrierId : deal.requesterId, {
+        title: "VanScout",
+        body: user.role === "requester"
+          ? "You were selected as the transporter."
+          : "Your transporter has confirmed the transport.",
+        url: user.role === "requester" ? "/carrier/offers" : "/customer/messages",
+        tag: `transport-deal-${deal.transportId}`,
+      }),
     ]);
     return NextResponse.json({ deal });
   } catch (error) {

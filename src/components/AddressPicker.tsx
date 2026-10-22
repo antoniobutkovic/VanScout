@@ -11,6 +11,14 @@ type AddressPickerProps = {
   showSearch?: boolean;
   showCurrentLocation?: boolean;
   radiusKm?: number;
+  radiusControl?: {
+    label: string;
+    valueLabel: string;
+    min: number;
+    max: number;
+    step: number;
+    onChange: (value: number) => void;
+  };
 };
 
 const ZAGREB: [number, number] = [15.9819, 45.8150];
@@ -81,7 +89,7 @@ function fitMapToRadius(map: import("maplibre-gl").Map, center: MapCoordinate, r
   });
 }
 
-export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true, showCurrentLocation = true, radiusKm }: AddressPickerProps) {
+export function AddressPicker({ label, placeholder, value, onChange, precisionHint, showSearch = true, showCurrentLocation = true, radiusKm, radiusControl }: AddressPickerProps) {
   const { t } = useLanguage();
   const [query, setQuery] = useState(value?.formatted || "");
   const [results, setResults] = useState<AddressLocation[]>([]);
@@ -317,6 +325,7 @@ export function AddressPicker({ label, placeholder, value, onChange, precisionHi
     <div className="address-picker-map-shell">
       <div ref={mapContainerRef} className="address-picker-map" aria-label={t("Map for selecting an exact location")} />
       <span className="address-picker-pin" aria-hidden="true"><svg viewBox="0 0 40 50"><path d="M20 2C10.06 2 2 10.06 2 20c0 13.5 18 28 18 28s18-14.5 18-28C38 10.06 29.94 2 20 2Z" /><circle cx="20" cy="20" r="6" /></svg></span>
+      {radiusControl && <label className="address-picker-radius-control" onPointerDown={event => event.stopPropagation()}><span><span>{radiusControl.label}</span><strong>{radiusControl.valueLabel}</strong></span><input type="range" min={radiusControl.min} max={radiusControl.max} step={radiusControl.step} value={radiusKm} onChange={event => radiusControl.onChange(Number(event.target.value))} aria-valuetext={radiusControl.valueLabel} /></label>}
       {isResolving && <div className="address-picker-map-loading" role="status">{t("Finding address…")}</div>}
     </div>
     {precisionHint && <p className="address-picker-hint">{precisionHint}</p>}

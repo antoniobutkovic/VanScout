@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authenticatedUser } from "@/lib/request-auth";
 import { createOrUpdateOffer, InsufficientCreditsError, listOffersForCustomer } from "@/lib/marketplace";
 import { publishRealtimeEvent } from "@/lib/realtime";
+import { sendPushNotification } from "@/lib/push";
 import { RestrictedContactDetailsError } from "@/lib/contact-details";
 
 const offerSchema = z.object({
@@ -39,6 +40,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await Promise.all([
       publishRealtimeEvent(`user:${offer.requesterId}`, "conversation-created", { offerId: offer.id }),
       publishRealtimeEvent(`user:${user.id}`, "conversation-created", { offerId: offer.id }),
+      sendPushNotification(offer.requesterId, {
+        title: "VanScout",
+        body: "You received a new transport offer.",
+        url: "/customer/messages",
+        tag: `offer-${offer.id}`,
+      }),
     ]);
     return NextResponse.json({ offer }, { status: 201 });
   } catch (error) {

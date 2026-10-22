@@ -5,6 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 export const metadata: Metadata = {
   title: "VanScout",
   description: "Request or offer transport services without the hassle.",
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: "/favicon.ico",
   },
