@@ -1605,9 +1605,17 @@ function urlBase64ToUint8Array(value: string) {
   return Uint8Array.from(bytes, character => character.charCodeAt(0));
 }
 
+function requiresHomeScreenInstallForPush() {
+  const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (!isiOS) return false;
+  const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
+  return !window.matchMedia("(display-mode: standalone)").matches && !standaloneNavigator.standalone;
+}
+
 function PushNotificationSettings({ includeMatchingTransports = false }: { includeMatchingTransports?: boolean }) {
   const { t } = useLanguage();
-  const [status, setStatus] = useState<"checking" | "ready" | "enabled" | "blocked" | "unsupported" | "unavailable" | "error">("checking");
+  const [status, setStatus] = useState<"checking" | "ready" | "enabled" | "blocked" | "unsupported" | "ios-home-screen-required" | "unavailable" | "error">("checking");
   const [publicKey, setPublicKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -1616,6 +1624,10 @@ function PushNotificationSettings({ includeMatchingTransports = false }: { inclu
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
   useEffect(() => {
+    if (requiresHomeScreenInstallForPush()) {
+      setStatus("ios-home-screen-required");
+      return;
+    }
     if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
       setStatus("unsupported");
       return;

@@ -43,6 +43,7 @@ p { line-height: 1.5; color: var(--muted); }
 .notification-settings p { max-width: 590px; margin: 0; font-size: 13px; }
 .notification-settings small { display: block; margin-top: 9px; color: var(--moss); font-size: 12px; font-weight: 700; }
 .notification-settings small.error { color: var(--red); }
+.notification-ios-steps { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .nav-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
 .topbar:not(.app-topbar) > .nav-actions { grid-column: 3; justify-self: end; }
 .picker-field { position: relative; width: 100%; margin-top: 20px; }
