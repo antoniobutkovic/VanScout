@@ -5,7 +5,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { RecaptchaVerifier, signInWithPhoneNumber, signOut, type Auth, type ConfirmationResult } from "firebase/auth";
 import { AsYouType, getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
 import { IMAGES } from "../assets/images";
-import { LanguagePicker, useLanguage } from "../i18n";
+import { LanguagePicker, type Language, useLanguage } from "../i18n";
 import { Picker } from "../components/Picker";
 import { AddressPicker } from "../components/AddressPicker";
 import { LegalDocumentContent } from "../components/LegalDocumentContent";
@@ -1700,6 +1700,51 @@ function PushNotificationSettings({ includeMatchingTransports = false }: { inclu
   return <section className="notification-settings"><div><h2>{t("Notifications")}</h2><p>{description}</p>{statusMessage && <small className={status === "error" || status === "blocked" ? "error" : ""}>{statusMessage}</small>}{needsHomeScreenInstructions && <ol className="notification-ios-steps"><li>{t("Open VanScout in Safari, Chrome, or another browser with Add to Home Screen.")}</li><li>{t("Tap Share, then choose Add to Home Screen.")}</li><li>{t("Open VanScout from the Home Screen and enable notifications in your profile.")}</li></ol>}</div>{status !== "checking" && status !== "unsupported" && status !== "ios-home-screen-required" && status !== "unavailable" && <button type="button" className="button moss short" disabled={busy} onClick={() => status === "enabled" ? void disable() : void enable()}>{busy ? t("Saving…") : t(status === "enabled" ? "Disable notifications" : "Enable notifications")}</button>}</section>;
 }
 
+function ProfileLanguageSettings() {
+  const { language, setLanguage, t } = useLanguage();
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>(language);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    void fetch("/api/me/language", { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
+      const payload = await response.json() as { language?: Language };
+      if (!response.ok || (payload.language !== "en" && payload.language !== "hr")) return;
+      setSelectedLanguage(payload.language);
+      setLanguage(payload.language);
+    }).catch(() => {
+      // The current language remains available if the saved preference cannot be read.
+    });
+  }, []);
+  const changeLanguage = async (nextValue: string) => {
+    if (nextValue !== "en" && nextValue !== "hr" || nextValue === selectedLanguage) return;
+    const nextLanguage = nextValue as Language;
+    const previousLanguage = selectedLanguage;
+    const token = getAuthToken();
+    if (!token) return;
+    setSelectedLanguage(nextLanguage);
+    setLanguage(nextLanguage);
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/me/language", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ language: nextLanguage }),
+      });
+      if (!response.ok) throw new Error();
+    } catch {
+      setSelectedLanguage(previousLanguage);
+      setLanguage(previousLanguage);
+      setError(t("Unable to save language preference"));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return <section className="notification-settings profile-language-settings"><div><h2>{t("Language")}</h2><p>{t("Your selected language will also be used for notifications.")}</p>{error && <small className="error" role="alert">{error}</small>}</div><Picker className="profile-language-picker" options={[{ value: "en", label: t("English") }, { value: "hr", label: t("Croatian") }]} value={selectedLanguage} ariaLabel={t("Language")} onChange={value => void changeLanguage(value)} />{saving && <span className="profile-language-saving">{t("Saving…")}</span>}</section>;
+}
+
 function CustomerProfile() {
   const { t } = useLanguage();
   const [profile, setProfile] = useState<{ name: string; email: string; phoneNumber: string | null; profileImageId: string | null } | null>(null);
@@ -1728,7 +1773,7 @@ function CustomerProfile() {
     } catch (saveError) { setError(saveError instanceof Error ? saveError.message : t("Unable to save profile")); }
   };
   const initials = profile?.name.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="profile-page real-requester-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { void changePhoto(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar customer large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.name || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/me/profile/image?v=${profile.profileImageId}`} alt={profile.name} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.name || t("Your profile")}</h1><div className="profile-stats">{profile ? <><span>{profile.email}</span>{profile.phoneNumber && <span>{profile.phoneNumber}</span>}</> : <span>{t("Loading profile…")}</span>}</div></div></div><PushNotificationSettings />{error && <p className="transport-list-message error" role="alert">{error}</p>}<DeleteAccountControl /></section>;
+  return <section className="profile-page real-requester-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { void changePhoto(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar customer large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.name || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/me/profile/image?v=${profile.profileImageId}`} alt={profile.name} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.name || t("Your profile")}</h1><div className="profile-stats">{profile ? <><span>{profile.email}</span>{profile.phoneNumber && <span>{profile.phoneNumber}</span>}</> : <span>{t("Loading profile…")}</span>}</div></div></div><ProfileLanguageSettings /><PushNotificationSettings />{error && <p className="transport-list-message error" role="alert">{error}</p>}<DeleteAccountControl /></section>;
 }
 function Review({ onDone }: { onDone: () => void }) { const { t } = useLanguage(); const [rating, setRating] = useState(5); return <section className="review"><p className="eyebrow">{t("Transport complete")}</p><h1>{t("How did it go?")}</h1><div className="profile-head"><Avatar large /><div><h2>Mario M.</h2><p>{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p></div></div><div className="stars">{[1,2,3,4,5].map(n => <button className={n <= rating ? "on" : ""} onClick={() => setRating(n)} key={n}>★</button>)}</div><div className="tags">{["On time", "Great communication", "Careful handling", "Friendly"].map(x => <button key={x}>{t(x)}</button>)}</div><label><textarea placeholder={t("Add a short comment (optional)")} /></label><button className="button moss" onClick={onDone}>{t("Submit review")}</button></section>; }
 export function Tracking() { const { t } = useLanguage(); return <div className="tracking"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /><span>{t("Private delivery tracking")}</span></div></header><main><p className="eyebrow">{t("Bed slats")} · 12 km</p><h1>{t("Your delivery is on the way.")}</h1><div className="tracking-map"><RouteLine /><i>●</i><b className="map-pickup">{t("From")}: IKEA Zagreb</b><b className="map-delivery">{t("To")}: Trešnjevka</b></div><section className="eta"><div><Avatar /><span><b>Mario M.</b><small>Renault Master</small></span></div><div><span>{t("Estimated arrival")}</span><b>18:42</b></div></section><div className="transport-steps tracking-list"><div className="done"><b>✓</b><span><strong>{t("Picked up")}</strong><small>{t("17:28 - Mario has your item.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("In transit")}</strong><small>{t("18:04 - Heavy traffic. ETA updated by 12 minutes.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("We’ll let you know when it arrives.")}</small></span></div></div></main></div>; }
@@ -2118,6 +2163,7 @@ function CarrierProfileEditor() {
     </form>
     {profileChanged && <div className="profile-save-float"><button className="button moss" type="submit" form="carrier-profile-form">{t("Save profile")}</button></div>}
     {profile && <CarrierReviews profile={profile} />}
+    <ProfileLanguageSettings />
     <PushNotificationSettings includeMatchingTransports />
     <VehicleManager vehicles={profile?.vehicles || []} onChange={vehicles => setProfile(current => current ? { ...current, vehicles } : current)} />
     <DeleteAccountControl />

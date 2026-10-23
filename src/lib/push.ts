@@ -1,7 +1,8 @@
 import * as webPush from "web-push";
 import { randomUUID } from "node:crypto";
 import { optionalEnv } from "./config";
-import { ensureDatabaseSchema, sqlClient } from "./database";
+import { ensureDatabaseSchema, getUserLanguagePreference, sqlClient } from "./database";
+import type { Language } from "./language";
 
 export type PushSubscriptionInput = {
   endpoint: string;
@@ -26,6 +27,24 @@ type WebPushConfiguration = {
 };
 
 let configuredWith = "";
+
+const CROATIAN_PUSH_COPY: Record<string, string> = {
+  "New matching transport": "Novi odgovarajući prijevoz",
+  "Your transporter has confirmed the transport.": "Vaš prijevoznik je potvrdio prijevoz.",
+  "You received a new ride request.": "Primili ste novi upit za vožnju.",
+  "You have a new message.": "Imate novu poruku.",
+  "You were selected as the transporter.": "Odabrani ste kao prijevoznik.",
+  "You received a new transport offer.": "Primili ste novu ponudu za prijevoz.",
+};
+
+function localizePushNotification(notification: PushNotification, language: Language): PushNotification {
+  if (language !== "hr") return notification;
+  return {
+    ...notification,
+    title: CROATIAN_PUSH_COPY[notification.title] || notification.title,
+    body: CROATIAN_PUSH_COPY[notification.body] || notification.body,
+  };
+}
 
 function webPushConfiguration(): WebPushConfiguration | null {
   const subject = optionalEnv("VAPID_SUBJECT");
@@ -77,14 +96,17 @@ export async function sendPushNotification(userId: string, notification: PushNot
   configureWebPush(configuration);
   await ensureDatabaseSchema();
   const sql = sqlClient();
-  const subscriptions = await sql`
-    SELECT endpoint, p256dh, auth, expiration_time
-    FROM vanscout_push_subscriptions
-    WHERE user_id = ${userId}
-  `;
+  const [subscriptions, language] = await Promise.all([
+    sql`
+      SELECT endpoint, p256dh, auth, expiration_time
+      FROM vanscout_push_subscriptions
+      WHERE user_id = ${userId}
+    `,
+    getUserLanguagePreference(userId),
+  ]);
   if (!subscriptions.length) return false;
 
-  const payload = JSON.stringify(notification);
+  const payload = JSON.stringify(localizePushNotification(notification, language));
   const results = await Promise.allSettled(subscriptions.map(async subscription => {
     const endpoint = String(subscription.endpoint);
     try {

@@ -581,6 +581,8 @@ const CROATIAN: Record<string, string> = {
   "Tap Share, then choose Add to Home Screen.": "Dodirnite Dijeli, zatim odaberite Dodaj na početni zaslon.",
   "Open VanScout from the Home Screen and enable notifications in your profile.": "Otvorite VanScout s početnog zaslona i uključite obavijesti u svom profilu.",
   "Keep an eye on it": "Pratite što se događa",
+  "Your selected language will also be used for notifications.": "Odabrani jezik koristit će se i za obavijesti.",
+  "Unable to save language preference": "Nije moguće spremiti postavku jezika",
   Pending: "Na čekanju",
   Accepted: "Prihvaćene",
   Past: "Prošle",

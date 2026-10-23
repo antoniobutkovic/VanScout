@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { randomUUID } from "node:crypto";
 import type { GoogleIdentity } from "./google";
 import { requiredEnv } from "./config";
+import { isLanguage, type Language } from "./language";
 
 export type AccountRole = "requester" | "transporter";
 
@@ -44,10 +45,12 @@ async function ensureSchema() {
         phone_number TEXT UNIQUE,
         phone_verified_at TIMESTAMPTZ,
         role TEXT NOT NULL DEFAULT 'requester' CHECK (role IN ('requester', 'transporter')),
+        preferred_language TEXT NOT NULL DEFAULT 'en' CHECK (preferred_language IN ('en', 'hr')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `.then(async () => {
+      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS preferred_language TEXT NOT NULL DEFAULT 'en' CHECK (preferred_language IN ('en', 'hr'))`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_email_verifications (
           token_hash TEXT PRIMARY KEY,
@@ -452,6 +455,23 @@ function toUser(row: Record<string, unknown>): AppUser {
     phoneNumber: typeof row.phone_number === "string" ? row.phone_number : null,
     phoneVerified: row.phone_verified_at instanceof Date || typeof row.phone_verified_at === "string",
   };
+}
+
+export async function getUserLanguagePreference(userId: string): Promise<Language> {
+  await ensureSchema();
+  const rows = await database()`SELECT preferred_language FROM vanscout_users WHERE id = ${userId} LIMIT 1`;
+  return isLanguage(rows[0]?.preferred_language) ? rows[0].preferred_language : "en";
+}
+
+export async function updateUserLanguagePreference(userId: string, language: Language): Promise<Language | null> {
+  await ensureSchema();
+  const rows = await database()`
+    UPDATE vanscout_users
+    SET preferred_language = ${language}, updated_at = NOW()
+    WHERE id = ${userId}
+    RETURNING preferred_language
+  `;
+  return isLanguage(rows[0]?.preferred_language) ? rows[0].preferred_language : null;
 }
 
 export async function findUserByGoogleIdentity(identity: GoogleIdentity): Promise<AppUser | null> {
