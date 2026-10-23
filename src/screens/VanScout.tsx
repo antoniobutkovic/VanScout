@@ -1692,10 +1692,12 @@ function PushNotificationSettings({ includeMatchingTransports = false }: { inclu
     ? t("Get alerts for messages, transport decisions, and new transports matching your saved filters.")
     : t("Get alerts for messages, offers, and transport decisions.");
   const statusMessage = status === "unsupported" ? t("Notifications are not supported in this browser.")
+    : status === "ios-home-screen-required" ? t("To receive notifications on iPhone or iPad, add VanScout to your Home Screen first.")
     : status === "unavailable" ? t("Notifications are not configured yet.")
       : status === "blocked" ? t("Notifications are blocked in your browser settings.")
         : message;
-  return <section className="notification-settings"><div><h2>{t("Notifications")}</h2><p>{description}</p>{statusMessage && <small className={status === "error" || status === "blocked" ? "error" : ""}>{statusMessage}</small>}</div>{status !== "checking" && status !== "unsupported" && status !== "unavailable" && <button type="button" className="button moss short" disabled={busy} onClick={() => status === "enabled" ? void disable() : void enable()}>{busy ? t("Saving…") : t(status === "enabled" ? "Disable notifications" : "Enable notifications")}</button>}</section>;
+  const needsHomeScreenInstructions = status === "ios-home-screen-required";
+  return <section className="notification-settings"><div><h2>{t("Notifications")}</h2><p>{description}</p>{statusMessage && <small className={status === "error" || status === "blocked" ? "error" : ""}>{statusMessage}</small>}{needsHomeScreenInstructions && <ol className="notification-ios-steps"><li>{t("Open VanScout in Safari, Chrome, or another browser with Add to Home Screen.")}</li><li>{t("Tap Share, then choose Add to Home Screen.")}</li><li>{t("Open VanScout from the Home Screen and enable notifications in your profile.")}</li></ol>}</div>{status !== "checking" && status !== "unsupported" && status !== "ios-home-screen-required" && status !== "unavailable" && <button type="button" className="button moss short" disabled={busy} onClick={() => status === "enabled" ? void disable() : void enable()}>{busy ? t("Saving…") : t(status === "enabled" ? "Disable notifications" : "Enable notifications")}</button>}</section>;
 }
 
 function CustomerProfile() {

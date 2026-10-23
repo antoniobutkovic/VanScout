@@ -577,7 +577,7 @@ const CROATIAN: Record<string, string> = {
   "Message {optional}": "Poruka {optional}",
   "My offers": "Moje ponude",
   "To receive notifications on iPhone or iPad, add VanScout to your Home Screen first.": "Za primanje obavijesti na iPhoneu ili iPadu prvo dodajte VanScout na početni zaslon.",
-  "Open VanScout in Safari.": "Otvorite VanScout u Safariju.",
+  "Open VanScout in Safari, Chrome, or another browser with Add to Home Screen.": "Otvorite VanScout u Safariju, Chromeu ili drugom pregledniku s opcijom Dodaj na početni zaslon.",
   "Tap Share, then choose Add to Home Screen.": "Dodirnite Dijeli, zatim odaberite Dodaj na početni zaslon.",
   "Open VanScout from the Home Screen and enable notifications in your profile.": "Otvorite VanScout s početnog zaslona i uključite obavijesti u svom profilu.",
   "Keep an eye on it": "Pratite što se događa",
