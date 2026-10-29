@@ -8,16 +8,19 @@ self.addEventListener("push", event => {
   const title = typeof data.title === "string" ? data.title : "VanScout";
   const body = typeof data.body === "string" ? data.body : "You have a new update.";
   const url = typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/";
+  const tag = typeof data.tag === "string" ? data.tag : "vanscout-update";
   event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(windows => {
     const appWindows = windows.filter(windowClient => new URL(windowClient.url).origin === self.location.origin);
     appWindows.forEach(windowClient => windowClient.postMessage({ type: "vanscout-push", notification: data }));
     const appIsVisible = appWindows.some(windowClient => windowClient.visibilityState === "visible");
-    if (appIsVisible) return;
+    // A message is time-sensitive, so show it on desktop even while the app is
+    // open. Other push types stay quiet while the user is already in VanScout.
+    if (appIsVisible && !tag.startsWith("message-")) return;
     return self.registration.showNotification(title, {
       body,
       icon: "/favicon.ico",
       badge: "/favicon.ico",
-      tag: typeof data.tag === "string" ? data.tag : "vanscout-update",
+      tag,
       data: { url },
     });
   }));

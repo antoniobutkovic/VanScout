@@ -1655,15 +1655,26 @@ function PushNotificationSettings() {
       setStatus("unsupported");
       return;
     }
-    void fetch("/api/push/config", { headers: requestHeaders() }).then(async response => {
-      const payload = await response.json() as { enabled?: boolean; publicKey?: string | null };
-      if (!response.ok || !payload.enabled || !payload.publicKey) {
+    void (async () => {
+      try {
+        const response = await fetch("/api/push/config", { headers: requestHeaders() });
+        const payload = await response.json() as { enabled?: boolean; publicKey?: string | null };
+        if (!response.ok || !payload.enabled || !payload.publicKey) {
+          setStatus("unavailable");
+          return;
+        }
+        setPublicKey(payload.publicKey);
+        if (Notification.permission === "denied") {
+          setStatus("blocked");
+          return;
+        }
+        const registration = await navigator.serviceWorker.register("/vanscout-push-worker.js");
+        const subscription = await registration.pushManager.getSubscription();
+        setStatus(subscription ? "enabled" : "ready");
+      } catch {
         setStatus("unavailable");
-        return;
       }
-      setPublicKey(payload.publicKey);
-      setStatus(Notification.permission === "denied" ? "blocked" : "ready");
-    }).catch(() => setStatus("unavailable"));
+    })();
   }, []);
   const enable = async () => {
     if (!publicKey) return;
