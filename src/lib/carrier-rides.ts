@@ -17,6 +17,15 @@ export type CarrierRide = {
   createdAt: string;
 };
 
+export type CarrierRideInquiry = {
+  id: string;
+  requesterName: string;
+  message: string;
+  status: "pending" | "confirmed" | "closed";
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CreateCarrierRide = Omit<CarrierRide, "id" | "carrierId" | "carrierName" | "companyName" | "myInquiryId" | "createdAt">;
 
 function dateOnly(value: unknown) {
@@ -97,7 +106,14 @@ export async function createRideInquiry(rideId: string, requesterId: string, mes
     SELECT ${`ride_${randomUUID()}`}, ride.id, ${requesterId}, ${encryptMessage(message)}
     FROM vanscout_carrier_rides ride
     WHERE ride.id = ${rideId} AND ride.active = TRUE AND ride.carrier_id <> ${requesterId}
-    ON CONFLICT (carrier_ride_id, requester_id) DO UPDATE SET message = EXCLUDED.message, status = 'pending', updated_at = NOW()
+    ON CONFLICT (carrier_ride_id, requester_id) DO UPDATE SET
+      message = EXCLUDED.message,
+      status = 'pending',
+      carrier_agreed_at = NULL,
+      requester_agreed_at = NULL,
+      confirmed_at = NULL,
+      updated_at = NOW()
+    WHERE vanscout_carrier_ride_inquiries.status IN ('pending', 'closed')
     RETURNING id, carrier_ride_id, requester_id
   `;
   if (!rows[0]) return null;
@@ -107,10 +123,89 @@ export async function createRideInquiry(rideId: string, requesterId: string, mes
   return { inquiryId: String(rows[0].id), carrierId: recipient[0] ? String(recipient[0].carrier_id) : "" };
 }
 
+export async function listCarrierRideInquiries(rideId: string, carrierId: string): Promise<CarrierRideInquiry[] | null> {
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const rows = await sql`
+    SELECT inquiry.id, requester.name AS requester_name, inquiry.message, inquiry.status,
+      inquiry.carrier_agreed_at, inquiry.requester_agreed_at, inquiry.created_at, inquiry.updated_at
+    FROM vanscout_carrier_ride_inquiries inquiry
+    JOIN vanscout_carrier_rides ride ON ride.id = inquiry.carrier_ride_id
+    JOIN vanscout_users requester ON requester.id = inquiry.requester_id
+    WHERE inquiry.carrier_ride_id = ${rideId} AND ride.carrier_id = ${carrierId}
+    ORDER BY inquiry.updated_at DESC, inquiry.created_at DESC
+  `;
+  return rows.map(row => ({
+    id: String(row.id),
+    requesterName: String(row.requester_name),
+    message: decryptMessage(String(row.message)),
+    status: (row.carrier_agreed_at && row.requester_agreed_at) || String(row.status) === "confirmed" ? "confirmed" : String(row.status) === "closed" ? "closed" : "pending",
+    createdAt: new Date(String(row.created_at)).toISOString(),
+    updatedAt: new Date(String(row.updated_at)).toISOString(),
+  }));
+}
+
+export type RideInquiryDeal = {
+  inquiryId: string;
+  carrierId: string;
+  requesterId: string;
+  carrierAgreed: boolean;
+  requesterAgreed: boolean;
+  confirmed: boolean;
+};
+
+export async function agreeToRideInquiry(inquiryId: string, userId: string, role: "requester" | "transporter"): Promise<RideInquiryDeal | null> {
+  await ensureDatabaseSchema();
+  const sql = sqlClient();
+  const agreed = role === "transporter"
+    ? await sql`
+      UPDATE vanscout_carrier_ride_inquiries inquiry
+      SET carrier_agreed_at = COALESCE(inquiry.carrier_agreed_at, NOW()), updated_at = NOW()
+      FROM vanscout_carrier_rides ride
+      WHERE inquiry.id = ${inquiryId} AND inquiry.carrier_ride_id = ride.id
+        AND ride.carrier_id = ${userId} AND inquiry.status = 'pending'
+      RETURNING inquiry.id
+    `
+    : await sql`
+      UPDATE vanscout_carrier_ride_inquiries inquiry
+      SET requester_agreed_at = COALESCE(inquiry.requester_agreed_at, NOW()), updated_at = NOW()
+      WHERE inquiry.id = ${inquiryId} AND inquiry.requester_id = ${userId} AND inquiry.status = 'pending'
+      RETURNING inquiry.id
+    `;
+  if (!agreed[0]) return null;
+  await sql`
+    UPDATE vanscout_carrier_ride_inquiries
+    SET status = 'confirmed', confirmed_at = NOW(), updated_at = NOW()
+    WHERE id = ${inquiryId} AND status = 'pending'
+      AND carrier_agreed_at IS NOT NULL AND requester_agreed_at IS NOT NULL
+  `;
+  const rows = await sql`
+    SELECT inquiry.id, inquiry.requester_id, ride.carrier_id,
+      (inquiry.carrier_agreed_at IS NOT NULL) AS carrier_agreed,
+      (inquiry.requester_agreed_at IS NOT NULL) AS requester_agreed,
+      (inquiry.status = 'confirmed') AS confirmed
+    FROM vanscout_carrier_ride_inquiries inquiry
+    JOIN vanscout_carrier_rides ride ON ride.id = inquiry.carrier_ride_id
+    WHERE inquiry.id = ${inquiryId}
+    LIMIT 1
+  `;
+  if (!rows[0]) return null;
+  const row = rows[0] as Record<string, unknown>;
+  return {
+    inquiryId: String(row.id),
+    requesterId: String(row.requester_id),
+    carrierId: String(row.carrier_id),
+    carrierAgreed: Boolean(row.carrier_agreed),
+    requesterAgreed: Boolean(row.requester_agreed),
+    confirmed: Boolean(row.carrier_agreed) && Boolean(row.requester_agreed),
+  };
+}
+
 async function rideInquiryAccess(inquiryId: string, userId: string) {
   const sql = sqlClient();
   const rows = await sql`
-    SELECT inquiry.id, inquiry.carrier_ride_id, inquiry.requester_id, inquiry.status, ride.carrier_id
+    SELECT inquiry.id, inquiry.carrier_ride_id, inquiry.requester_id, inquiry.status,
+      inquiry.carrier_agreed_at, inquiry.requester_agreed_at, ride.carrier_id
     FROM vanscout_carrier_ride_inquiries inquiry
     JOIN vanscout_carrier_rides ride ON ride.id = inquiry.carrier_ride_id
     WHERE inquiry.id = ${inquiryId} AND (${userId} = inquiry.requester_id OR ${userId} = ride.carrier_id)
@@ -148,14 +243,16 @@ export async function listRideInquiryMessages(inquiryId: string, userId: string,
 export async function sendRideInquiryMessage(inquiryId: string, senderId: string, body: string) {
   await ensureDatabaseSchema();
   const access = await rideInquiryAccess(inquiryId, senderId);
-  if (!access || String(access.status) !== "pending") return null;
-  if (hasRestrictedContactDetails(body)) throw new RestrictedContactDetailsError();
+  const status = String(access?.status || "");
+  const confirmed = Boolean(access?.carrier_agreed_at) && Boolean(access?.requester_agreed_at);
+  if (!access || (status !== "pending" && status !== "confirmed")) return null;
+  if (!confirmed && hasRestrictedContactDetails(body)) throw new RestrictedContactDetailsError();
   const sql = sqlClient();
   const recent = await sql`
     SELECT sender_id, body FROM vanscout_carrier_ride_messages
     WHERE inquiry_id = ${inquiryId} ORDER BY created_at DESC LIMIT 2
   `;
-  if (recent.length && recent.every(row => String(row.sender_id) === senderId)) {
+  if (!confirmed && recent.length && recent.every(row => String(row.sender_id) === senderId)) {
     if (hasDistributedPhoneNumber([...recent.reverse().map(row => decryptMessage(String(row.body))), body])) throw new RestrictedContactDetailsError();
   }
   const rows = await sql`

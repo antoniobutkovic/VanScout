@@ -6,6 +6,7 @@ export type CarrierSearchPreferences = {
   distanceKm: number | null;
   pickupArea: AddressLocation | null;
   pickupRadiusKm: number;
+  notifyOnMatch: boolean;
 };
 
 function toPreferences(row: Record<string, unknown>): CarrierSearchPreferences {
@@ -21,6 +22,7 @@ function toPreferences(row: Record<string, unknown>): CarrierSearchPreferences {
       city: typeof row.pickup_city === "string" || row.pickup_city === null ? row.pickup_city || undefined : undefined,
     } : null,
     pickupRadiusKm: Number(row.pickup_radius_km) || 25,
+    notifyOnMatch: row.notify_on_match === true || row.notify_on_match === "true",
   };
 }
 
@@ -28,7 +30,7 @@ export async function getCarrierSearchPreferences(carrierId: string): Promise<Ca
   await ensureDatabaseSchema();
   const sql = sqlClient();
   const rows = await sql`
-    SELECT distance_km, pickup_formatted, pickup_latitude, pickup_longitude, pickup_city, pickup_radius_km
+    SELECT distance_km, pickup_formatted, pickup_latitude, pickup_longitude, pickup_city, pickup_radius_km, notify_on_match
     FROM vanscout_carrier_search_preferences
     WHERE carrier_id = ${carrierId}
     LIMIT 1
@@ -42,10 +44,10 @@ export async function saveCarrierSearchPreferences(carrierId: string, preference
   const pickup = preferences.pickupArea;
   const rows = await sql`
     INSERT INTO vanscout_carrier_search_preferences (
-      carrier_id, distance_km, pickup_formatted, pickup_latitude, pickup_longitude, pickup_city, pickup_radius_km
+      carrier_id, distance_km, pickup_formatted, pickup_latitude, pickup_longitude, pickup_city, pickup_radius_km, notify_on_match
     ) VALUES (
       ${carrierId}, ${preferences.distanceKm}, ${pickup?.formatted || null}, ${pickup?.latitude ?? null},
-      ${pickup?.longitude ?? null}, ${pickup?.city || null}, ${preferences.pickupRadiusKm}
+      ${pickup?.longitude ?? null}, ${pickup?.city || null}, ${preferences.pickupRadiusKm}, ${preferences.notifyOnMatch}
     )
     ON CONFLICT (carrier_id) DO UPDATE SET
       distance_km = EXCLUDED.distance_km,
@@ -54,8 +56,9 @@ export async function saveCarrierSearchPreferences(carrierId: string, preference
       pickup_longitude = EXCLUDED.pickup_longitude,
       pickup_city = EXCLUDED.pickup_city,
       pickup_radius_km = EXCLUDED.pickup_radius_km,
+      notify_on_match = EXCLUDED.notify_on_match,
       updated_at = NOW()
-    RETURNING distance_km, pickup_formatted, pickup_latitude, pickup_longitude, pickup_city, pickup_radius_km
+    RETURNING distance_km, pickup_formatted, pickup_latitude, pickup_longitude, pickup_city, pickup_radius_km, notify_on_match
   `;
   return toPreferences(rows[0] as Record<string, unknown>);
 }
@@ -78,6 +81,7 @@ export async function findCarrierIdsWithMatchingSearchPreferences(transport: Tra
     FROM vanscout_carrier_search_preferences preferences
     JOIN vanscout_users user_account ON user_account.id = preferences.carrier_id
     WHERE user_account.role = 'transporter'
+      AND preferences.notify_on_match = TRUE
       AND (preferences.distance_km IS NOT NULL OR preferences.pickup_latitude IS NOT NULL)
   `;
   return rows.flatMap(row => {

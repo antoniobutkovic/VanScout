@@ -15,7 +15,7 @@ import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_
 import { offerPriceFromEnteredAmount, offerPriceFromTotal } from "../lib/offer-pricing";
 import { googleMapsDirectionsUrl } from "../lib/google-maps-directions";
 import { CONTACT_DETAILS_RESTRICTED_MESSAGE, hasRestrictedContactDetails } from "../lib/contact-details";
-import type { CarrierRide } from "../lib/carrier-rides";
+import type { CarrierRide, CarrierRideInquiry } from "../lib/carrier-rides";
 import type { AddressLocation } from "../lib/location";
 import type { TransportRequest, TransportStatus } from "../lib/transport-types";
 import type { CarrierProfile as CarrierProfileData, CarrierVehicle, ChatMessage, Conversation, CreditAccount, MarketplaceTransport, TransportOffer } from "../lib/marketplace-types";
@@ -36,6 +36,8 @@ const ITEM_NAME_MAX_LENGTH = 200;
 const MAX_PICKUP_RADIUS_KM = 3_000;
 
 function Arrow() { return null; }
+function SettingsIcon() { return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Z" /><path d="M19.1 13.6a7.6 7.6 0 0 0 .05-1.6 7.6 7.6 0 0 0-.05-1.6l2-1.5-2-3.46-2.35.95a8.1 8.1 0 0 0-2.76-1.6L13.65 2h-4l-.34 2.79a8.1 8.1 0 0 0-2.76 1.6L4.2 5.44 2.2 8.9l2 1.5a7.6 7.6 0 0 0-.05 1.6 7.6 7.6 0 0 0 .05 1.6l-2 1.5 2 3.46 2.35-.95a8.1 8.1 0 0 0 2.76 1.6L9.65 22h4l.34-2.79a8.1 8.1 0 0 0 2.76-1.6l2.35.95 2-3.46-2-1.5Z" /></svg>; }
+function BackIcon() { return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5" /><path d="m11 18-6-6 6-6" /></svg>; }
 function Mark() { return <Link className="brand" to="/" aria-label="VanScout home"><Image src="/vanscout-logo.png" alt="VanScout" width={2172} height={724} /></Link>; }
 function RouteLine({ small = false }: { small?: boolean }) { return <span className={`route-line ${small ? "small" : ""}`}><i /><b /><i /></span>; }
 function TransportRoute({ from, to, short = true, className = "" }: { from: string; to: string; short?: boolean; className?: string }) {
@@ -389,8 +391,8 @@ function Topbar({ kind, active }: { kind?: "customer" | "carrier"; active?: stri
     return () => { document.body.style.overflow = previousOverflow; };
   }, [drawerOpen]);
   const links = kind === "carrier"
-    ? [["jobs", "Find jobs", "/carrier"], ["offers", "My offers", "/carrier/offers"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]]
-    : [["requests", "Requests", "/customer"], ["rides", "Carriers", "/customer/carriers"], ["messages", "Messages", "/customer/messages"], ["profile", "Profile", "/customer/profile"]];
+    ? [["jobs", "Find jobs", "/carrier"], ["offers", "Sent offers", "/carrier/offers"], ["messages", "Messages", "/carrier/messages"], ["credits", "Credits", "/carrier/credits"], ["profile", "Profile", "/carrier/profile"]]
+    : [["requests", "Requests", "/customer"], ["rides", "Transports", "/customer/carriers"], ["messages", "Messages", "/customer/messages"], ["profile", "Profile", "/customer/profile"]];
   const navigation = (inDrawer = false) => <nav aria-label={t("Navigation")}>{links.map(([key, label, href]) => <Link className={active === key ? "active" : ""} aria-current={active === key ? "page" : undefined} key={key} to={href} onClick={inDrawer ? closeDrawer : undefined}>{t(label)}{key === "messages" && hasMessages && <span className="notification-indicator" aria-label={t("Unread messages")} />}</Link>)}</nav>;
   return <header className={`topbar ${kind ? "app-topbar" : ""}`}>
     <Mark />{kind && navigation()}<HeaderActions kind={kind} />
@@ -1189,7 +1191,7 @@ export function CustomerWorkspace() {
     return () => controller.abort();
   }, [filter, nav, selectedTransportId, t]);
 
-  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title transport-workspace-title"><div><h1>{t("My transports")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => nav(`/customer/requests/${request.id}`)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onOpenMessages={offerId => go("messages", offerId)} />}{view === "rides" && <CarrierRideMarketplace onOpenConversation={inquiryId => go("messages", inquiryId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
+  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title transport-workspace-title"><div><h1>{t("Requests")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => nav(`/customer/requests/${request.id}`)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onOpenMessages={offerId => go("messages", offerId)} />}{view === "rides" && <CarrierRideMarketplace onOpenConversation={inquiryId => go("messages", inquiryId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
 }
 
 function RequestDetail({ request, onOpenMessages }: { request: TransportRequest; onOpenMessages: (offerId: string) => void }) {
@@ -1271,10 +1273,10 @@ function CarrierReviews({ profile }: { profile: CarrierProfileData }) {
   const ratingSummary = profile.ratingAverage === null
     ? null
     : `★ ${profile.ratingAverage.toFixed(1)} · ${profile.ratingCount} ${t("ratings")}`;
-  return <section className="carrier-reviews"><details>
+  return <div className="carrier-reviews"><details open={profile.reviews.length === 0}>
     <summary><span><b>{t("Customer reviews")}</b>{ratingSummary && <small>{ratingSummary}</small>}</span><span className="review-disclosure" aria-hidden="true" /></summary>
     <div className="review-list">{profile.reviews.length ? profile.reviews.map(review => <blockquote key={review.id}><b>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</b>{review.feedback && <span>“{review.feedback}”</span>}<footer>- {review.customerName}, {new Intl.DateTimeFormat(language === "hr" ? "hr-HR" : "en-GB", { month: "short", year: "numeric" }).format(new Date(review.createdAt))}</footer></blockquote>) : <p>{t("No customer reviews yet")}</p>}</div>
-  </details></section>;
+  </details></div>;
 }
 
 function PublicCarrierProfile({ carrierId, onClose }: { carrierId: string; onClose: () => void }) {
@@ -1289,13 +1291,12 @@ function PublicCarrierProfile({ carrierId, onClose }: { carrierId: string; onClo
       setProfile(payload.profile);
     }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load profile")));
   }, [carrierId, t]);
-  return <div className="overlay"><aside className="side public-carrier-profile" aria-label={t("Carrier profile")}><button className="close" type="button" onClick={onClose}>×</button>
+  return <div className="overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><aside className="side public-carrier-profile" aria-label={t("Carrier profile")}><button className="close" type="button" onClick={onClose}>×</button>
     {error ? <p className="transport-list-message error">{error}</p> : !profile ? <p className="transport-list-message">{t("Loading profile…")}</p> : <>
       <div className="profile-head"><span className="avatar large">{profile.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : profile.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><div><h2>{profile.companyName || profile.carrierName}</h2>{(profile.completedTransports > 0 || profile.kilometresTravelled > 0) && <div className="profile-stats">{profile.completedTransports > 0 && <span>{profile.completedTransports} {t("completed transports")}</span>}{profile.kilometresTravelled > 0 && <span>{new Intl.NumberFormat(language === "hr" ? "hr-HR" : "en-GB").format(profile.kilometresTravelled)} km {t("travelled")}</span>}</div>}</div></div>
       {profile.bio && <p>{profile.bio}</p>}
       {profile.imageIds.length > 0 && <section className="carrier-business-images"><h3>{t("Business images")}</h3><div className="carrier-image-grid">{profile.imageIds.map((imageId, index) => <figure key={imageId}><PrivateImage src={`/api/carrier-profile/images/${imageId}`} alt={`${profile.companyName || profile.carrierName} · ${t("Business images")} ${index + 1}`} /></figure>)}</div></section>}
-      <section><h3>{t("Vehicles")}</h3>{profile.vehicles.length ? profile.vehicles.map(vehicle => <div className="vehicle" key={vehicle.id}>▰ <div><b>{vehicle.name}</b><span>{vehicle.sizeDescription}</span></div></div>) : <p>{t("No vehicles added yet")}</p>}</section>
-      <CarrierReviews profile={profile} />
+      <section><h3>{t("Vehicles")}</h3>{profile.vehicles.length ? profile.vehicles.map(vehicle => <div className="vehicle" key={vehicle.id}>▰ <div><b>{vehicle.name}</b><span>{vehicle.sizeDescription}</span></div></div>) : <p>{t("No vehicles added yet")}</p>}<CarrierReviews profile={profile} /></section>
     </>}
   </aside></div>;
 }
@@ -1527,7 +1528,7 @@ function LiveMessages() {
     if (!token || !selected) return;
     setAgreementSaving(true);
     setError("");
-    const response = await fetch(`/api/offers/${selected.offerId}/agreement`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch(selected.type === "ride_inquiry" ? `/api/carrier-rides/inquiries/${selected.offerId}/agreement` : `/api/offers/${selected.offerId}/agreement`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
     const payload = await response.json() as { deal?: { insufficientCredits?: boolean; commissionCents?: number; carrierBalanceCents?: number }; error?: string; requiredCents?: number; balanceCents?: number };
     setAgreementSaving(false);
     if (!response.ok) {
@@ -1544,12 +1545,18 @@ function LiveMessages() {
 
   const isRideInquiry = selected?.type === "ride_inquiry";
   const needsCarrierCredits = !isRideInquiry && selected?.role === "transporter" && selected.status === "pending" && selected.carrierBalanceCents < selected.commissionCents;
-  const agreementLabel = isRideInquiry
-    ? t("Ride request in discussion")
+  const agreementLabel = selected?.status === "confirmed"
+    ? t("Transport agreed")
+    : isRideInquiry
+    ? selected?.role === "requester"
+      ? selected?.selectedByCustomer
+        ? t("You are ready - waiting for the carrier")
+        : selected?.carrierAgreed ? t("Carrier is ready") : t("Ride request in discussion")
+      : selected?.carrierAgreed
+        ? t("You are ready - waiting for the customer")
+        : selected?.selectedByCustomer ? t("Customer selected you") : t("Agree when the transport details are settled")
     : needsCarrierCredits
     ? t("Sufficient credits are required to chat and accept this transport.")
-    : selected?.status === "confirmed"
-    ? t("Transport agreed")
     : selected?.status === "rejected"
       ? t("Another carrier was selected")
       : selected?.role === "requester"
@@ -1559,7 +1566,7 @@ function LiveMessages() {
         : selected?.carrierAgreed
           ? selected.selectedByCustomer ? t("Add credits to complete the agreement") : t("You are ready - waiting for the customer")
           : selected?.selectedByCustomer ? t("Customer selected you") : t("Agree when the transport details are settled");
-  const canAgree = !isRideInquiry && !needsCarrierCredits && selected?.status === "pending" && (selected.role === "requester" ? !selected.selectedByCustomer : !selected.carrierAgreed);
+  const canAgree = !needsCarrierCredits && selected?.status === "pending" && (selected.role === "requester" ? !selected.selectedByCustomer : !selected.carrierAgreed);
 
   return <section className={`messages-page live-messages-page ${selected ? "chat-open" : ""}`}>
     <header><h1>{t("Messages")}</h1></header>
@@ -1568,8 +1575,8 @@ function LiveMessages() {
       <aside>{conversations.map(conversation => <button className={`conversation ${selectedId === conversation.offerId ? "selected" : ""}`} onClick={() => openConversation(conversation.offerId)} key={conversation.offerId}><ConversationAvatar conversation={conversation} /><span><b>{conversation.otherPartyName}</b><small>{t(conversationStatusLabel(conversation))}</small></span>{mobile ? <span className="conversation-meta">{conversation.type === "offer" && <span className="offer-tag conversation-price"><OfferPrice priceCents={conversation.priceCents} vatIncluded={conversation.vatIncluded} /></span>}{conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</span> : conversation.hasUnreadMessages && <span className="conversation-unread" aria-label={t("Unread messages")} />}</button>)}</aside>
       {selected && <article>
         <header><div><ConversationAvatar conversation={selected} /><span className="conversation-heading"><b>{selected.otherPartyName}</b><small title={selected.itemName}>{selected.itemName}</small></span></div>{!mobile && selected.type === "offer" && <span className="offer-tag"><OfferPrice priceCents={selected.priceCents} vatIncluded={selected.vatIncluded} /></span>}</header>
-        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <>{mobile && <b className="mobile-contact-status">{t("Contact details unlocked")}</b>}<div className="contact-note contact-revealed deal-contact">{!mobile && <b>{t("Contact details unlocked")}</b>}{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div></>}</div>
-        <div className="thread" ref={threadRef}>{selected.offerMessage && <p className={`bubble ${selected.type === "offer" ? selected.role === "transporter" : selected.role === "requester" ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}</div>
+        <div className={`chat-context deal-context ${selected.status === "confirmed" ? "confirmed" : ""}`}><span><b>{agreementLabel}</b><small>{t("Available")}: {formatTransportDates(selected.availableDate, null, language)}</small></span>{canAgree && <button className="button moss short" disabled={agreementSaving} onClick={() => void agree()}>{agreementSaving ? t("Saving…") : t(selected.type === "ride_inquiry" ? selected.role === "requester" ? "Confirm transport" : "Accept request" : selected.role === "requester" ? "Choose this carrier" : "Agree to transport")}</button>}{needsCarrierCredits && <Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link>}{selected.status === "confirmed" && <>{mobile && <b className="mobile-contact-status">{t("Contact details unlocked")}</b>}<div className="contact-note contact-revealed deal-contact">{!mobile && <b>{t("Contact details unlocked")}</b>}{selected.otherPartyPhone && <a href={`tel:${selected.otherPartyPhone}`}>{selected.otherPartyPhone}</a>}{selected.otherPartyEmail && <a href={`mailto:${selected.otherPartyEmail}`}>{selected.otherPartyEmail}</a>}</div></>}</div>
+        <div className="thread" ref={threadRef}>{selected.offerMessage && <p className={`bubble ${(selected.type === "offer" && selected.role === "transporter") || (selected.type === "ride_inquiry" && selected.role === "requester") ? "mine" : "theirs"}`}>{selected.offerMessage}</p>}{messages.map(message => <p className={`bubble ${message.senderId === userId ? "mine" : "theirs"}`} key={message.id}>{message.body}</p>)}</div>
         {selected.status === "rejected" ? <p className="conversation-closed">{t("This conversation is read-only because another carrier was confirmed.")}</p> : needsCarrierCredits ? <div className="conversation-credit-lock"><span>{t("Sufficient credits are required to chat and accept this transport.")}</span><Link className="button moss short" to="/carrier/credits">{t("Add credits")}</Link></div> : <>{selected.status === "pending" && <p className="contact-note compose-contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p>}<form noValidate onSubmit={submit}><input value={note} onChange={event => setNote(event.target.value)} placeholder={t("Write a message")} /><button aria-label={t("Send")} disabled={!note.trim()}>↑</button></form></>}
       </article>}
     </div>}
@@ -1613,7 +1620,7 @@ function requiresHomeScreenInstallForPush() {
   return !window.matchMedia("(display-mode: standalone)").matches && !standaloneNavigator.standalone;
 }
 
-function PushNotificationSettings({ includeMatchingTransports = false }: { includeMatchingTransports?: boolean }) {
+function PushNotificationSettings() {
   const { t } = useLanguage();
   const [status, setStatus] = useState<"checking" | "ready" | "enabled" | "blocked" | "unsupported" | "ios-home-screen-required" | "unavailable" | "error">("checking");
   const [publicKey, setPublicKey] = useState("");
@@ -1661,7 +1668,6 @@ function PushNotificationSettings({ includeMatchingTransports = false }: { inclu
       });
       if (!response.ok) throw new Error();
       setStatus("enabled");
-      setMessage(t("Notifications enabled"));
     } catch {
       setStatus("error");
       setMessage(t("Unable to enable notifications"));
@@ -1682,28 +1688,24 @@ function PushNotificationSettings({ includeMatchingTransports = false }: { inclu
         await subscription.unsubscribe();
       }
       setStatus("ready");
-      setMessage(t("Notifications disabled"));
     } catch {
       setStatus("error");
       setMessage(t("Unable to disable notifications"));
     } finally { setBusy(false); }
   };
-  const description = includeMatchingTransports
-    ? t("Get alerts for messages, transport decisions, and new transports matching your saved filters.")
-    : t("Get alerts for messages, offers, and transport decisions.");
   const statusMessage = status === "unsupported" ? t("Notifications are not supported in this browser.")
     : status === "ios-home-screen-required" ? t("To receive notifications on iPhone or iPad, add VanScout to your Home Screen first.")
     : status === "unavailable" ? t("Notifications are not configured yet.")
       : status === "blocked" ? t("Notifications are blocked in your browser settings.")
         : message;
   const needsHomeScreenInstructions = status === "ios-home-screen-required";
-  return <section className="notification-settings"><div><h2>{t("Notifications")}</h2><p>{description}</p>{statusMessage && <small className={status === "error" || status === "blocked" ? "error" : ""}>{statusMessage}</small>}{needsHomeScreenInstructions && <ol className="notification-ios-steps"><li>{t("Open VanScout in Safari, Chrome, or another browser with Add to Home Screen.")}</li><li>{t("Tap Share, then choose Add to Home Screen.")}</li><li>{t("Open VanScout from the Home Screen and enable notifications in your profile.")}</li></ol>}</div>{status !== "checking" && status !== "unsupported" && status !== "ios-home-screen-required" && status !== "unavailable" && <button type="button" className="button moss short" disabled={busy} onClick={() => status === "enabled" ? void disable() : void enable()}>{busy ? t("Saving…") : t(status === "enabled" ? "Disable notifications" : "Enable notifications")}</button>}</section>;
+  const canToggle = status === "ready" || status === "enabled";
+  return <section className="notification-settings"><div><h2>{t("Notifications")}</h2>{statusMessage && <small className={status === "error" || status === "blocked" ? "error" : ""}>{statusMessage}</small>}{needsHomeScreenInstructions && <ol className="notification-ios-steps"><li>{t("Open VanScout in Safari, Chrome, or another browser with Add to Home Screen.")}</li><li>{t("Tap Share, then choose Add to Home Screen.")}</li><li>{t("Open VanScout from the Home Screen and enable notifications in your profile.")}</li></ol>}</div>{canToggle && <button type="button" className="notification-toggle" role="switch" aria-checked={status === "enabled"} aria-label={t(status === "enabled" ? "Disable notifications" : "Enable notifications")} disabled={busy} onClick={() => status === "enabled" ? void disable() : void enable()}><span /></button>}</section>;
 }
 
 function ProfileLanguageSettings() {
   const { language, setLanguage, t } = useLanguage();
   const [selectedLanguage, setSelectedLanguage] = useState<Language>(language);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     const token = getAuthToken();
@@ -1725,7 +1727,6 @@ function ProfileLanguageSettings() {
     if (!token) return;
     setSelectedLanguage(nextLanguage);
     setLanguage(nextLanguage);
-    setSaving(true);
     setError("");
     try {
       const response = await fetch("/api/me/language", {
@@ -1738,11 +1739,19 @@ function ProfileLanguageSettings() {
       setSelectedLanguage(previousLanguage);
       setLanguage(previousLanguage);
       setError(t("Unable to save language preference"));
-    } finally {
-      setSaving(false);
     }
   };
-  return <section className="notification-settings profile-language-settings"><div><h2>{t("Language")}</h2><p>{t("Your selected language will also be used for notifications.")}</p>{error && <small className="error" role="alert">{error}</small>}</div><Picker className="profile-language-picker" options={[{ value: "en", label: t("English") }, { value: "hr", label: t("Croatian") }]} value={selectedLanguage} ariaLabel={t("Language")} onChange={value => void changeLanguage(value)} />{saving && <span className="profile-language-saving">{t("Saving…")}</span>}</section>;
+  return <section className="notification-settings profile-language-settings"><div><h2>{t("Language")}</h2>{error && <small className="error" role="alert">{error}</small>}</div><Picker className="profile-language-picker" options={[{ value: "en", label: t("English") }, { value: "hr", label: t("Croatian") }]} value={selectedLanguage} ariaLabel={t("Language")} onChange={value => void changeLanguage(value)} /></section>;
+}
+
+function ProfileSettingsButton({ onOpen }: { onOpen: () => void }) {
+  const { t } = useLanguage();
+  return <div className="profile-settings-control"><button type="button" className="profile-settings-trigger" aria-label={t("Settings")} title={t("Settings")} onClick={onOpen}><SettingsIcon /></button></div>;
+}
+
+function ProfileSettingsScreen({ onBack }: { onBack: () => void }) {
+  const { t } = useLanguage();
+  return <section className="profile-settings-page"><div className="workspace-title profile-settings-title"><button type="button" className="profile-settings-back" aria-label={t("Back to profile")} title={t("Back to profile")} autoFocus onClick={onBack}><BackIcon /></button><h1>{t("Settings")}</h1></div><ProfileLanguageSettings /><PushNotificationSettings /></section>;
 }
 
 function CustomerProfile() {
@@ -1750,6 +1759,7 @@ function CustomerProfile() {
   const [profile, setProfile] = useState<{ name: string; email: string; phoneNumber: string | null; profileImageId: string | null } | null>(null);
   const [profileImage, setProfileImage] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     void fetch("/api/me/profile", { cache: "no-store" }).then(async response => {
       if (!response.ok) throw new Error();
@@ -1773,7 +1783,7 @@ function CustomerProfile() {
     } catch (saveError) { setError(saveError instanceof Error ? saveError.message : t("Unable to save profile")); }
   };
   const initials = profile?.name.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
-  return <section className="profile-page real-requester-profile"><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { void changePhoto(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar customer large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.name || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/me/profile/image?v=${profile.profileImageId}`} alt={profile.name} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.name || t("Your profile")}</h1><div className="profile-stats">{profile ? <><span>{profile.email}</span>{profile.phoneNumber && <span>{profile.phoneNumber}</span>}</> : <span>{t("Loading profile…")}</span>}</div></div></div><ProfileLanguageSettings /><PushNotificationSettings />{error && <p className="transport-list-message error" role="alert">{error}</p>}<DeleteAccountControl /></section>;
+  return <section className="profile-page real-requester-profile">{settingsOpen ? <ProfileSettingsScreen onBack={() => setSettingsOpen(false)} /> : <><ProfileSettingsButton onOpen={() => setSettingsOpen(true)} /><div className="profile-head"><label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { void changePhoto(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar customer large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.name || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/me/profile/image?v=${profile.profileImageId}`} alt={profile.name} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label><div><h1>{profile?.name || t("Your profile")}</h1><div className="profile-stats">{profile ? <><span>{profile.email}</span>{profile.phoneNumber && <span>{profile.phoneNumber}</span>}</> : <span>{t("Loading profile…")}</span>}</div></div></div>{error && <p className="transport-list-message error" role="alert">{error}</p>}<DeleteAccountControl /></>}</section>;
 }
 function Review({ onDone }: { onDone: () => void }) { const { t } = useLanguage(); const [rating, setRating] = useState(5); return <section className="review"><p className="eyebrow">{t("Transport complete")}</p><h1>{t("How did it go?")}</h1><div className="profile-head"><Avatar large /><div><h2>Mario M.</h2><p>{t("Bed slats")} · IKEA Zagreb → Trešnjevka</p></div></div><div className="stars">{[1,2,3,4,5].map(n => <button className={n <= rating ? "on" : ""} onClick={() => setRating(n)} key={n}>★</button>)}</div><div className="tags">{["On time", "Great communication", "Careful handling", "Friendly"].map(x => <button key={x}>{t(x)}</button>)}</div><label><textarea placeholder={t("Add a short comment (optional)")} /></label><button className="button moss" onClick={onDone}>{t("Submit review")}</button></section>; }
 export function Tracking() { const { t } = useLanguage(); return <div className="tracking"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /><span>{t("Private delivery tracking")}</span></div></header><main><p className="eyebrow">{t("Bed slats")} · 12 km</p><h1>{t("Your delivery is on the way.")}</h1><div className="tracking-map"><RouteLine /><i>●</i><b className="map-pickup">{t("From")}: IKEA Zagreb</b><b className="map-delivery">{t("To")}: Trešnjevka</b></div><section className="eta"><div><Avatar /><span><b>Mario M.</b><small>Renault Master</small></span></div><div><span>{t("Estimated arrival")}</span><b>18:42</b></div></section><div className="transport-steps tracking-list"><div className="done"><b>✓</b><span><strong>{t("Picked up")}</strong><small>{t("17:28 - Mario has your item.")}</small></span></div><div className="active"><b>●</b><span><strong>{t("In transit")}</strong><small>{t("18:04 - Heavy traffic. ETA updated by 12 minutes.")}</small></span></div><div><b>○</b><span><strong>{t("Delivered")}</strong><small>{t("We’ll let you know when it arrives.")}</small></span></div></div></main></div>; }
@@ -1790,7 +1800,8 @@ function CarrierRideMarketplace({ onOpenConversation }: { onOpenConversation: (i
   const [rides, setRides] = useState<CarrierRide[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<CarrierRide | null>(null);
+  const [requestingRide, setRequestingRide] = useState<CarrierRide | null>(null);
+  const [profileCarrierId, setProfileCarrierId] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   useEffect(() => {
@@ -1809,25 +1820,26 @@ function CarrierRideMarketplace({ onOpenConversation }: { onOpenConversation: (i
   const sendRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const token = getAuthToken();
-    if (!token || !selected || !message.trim()) return;
+    if (!token || !requestingRide || !message.trim()) return;
     setSending(true); setError("");
     try {
-      const response = await fetch(`/api/carrier-rides/${selected.id}/inquiries`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ message: message.trim() }) });
+      const response = await fetch(`/api/carrier-rides/${requestingRide.id}/inquiries`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ message: message.trim() }) });
       const payload = await response.json() as { inquiry?: { inquiryId: string }; error?: string };
       if (!response.ok || !payload.inquiry) throw new Error(payload.error || t("Unable to send ride request"));
-      setRides(current => current.map(ride => ride.id === selected.id ? { ...ride, myInquiryId: payload.inquiry!.inquiryId } : ride));
-      setSelected(null);
+      setRides(current => current.map(ride => ride.id === requestingRide.id ? { ...ride, myInquiryId: payload.inquiry!.inquiryId } : ride));
+      setRequestingRide(null);
     } catch (submitError) { setError(submitError instanceof Error ? submitError.message : t("Unable to send ride request")); } finally { setSending(false); }
   };
-  return <section className="carrier-rides carrier-rides-marketplace"><div className="workspace-title"><div><h1>{t("Carriers")}</h1></div></div>{error && <p className="transport-list-message error">{error}</p>}{loading ? <p className="transport-list-message">{t("Loading carrier rides…")}</p> : rides.length ? <div className="carrier-ride-list">{rides.map(ride => <article className="carrier-ride-card" key={ride.id}><div><b>{ride.companyName || ride.carrierName}</b><TransportRoute from={ride.pickup} to={ride.delivery} short={false} /><CarrierRideSchedule ride={ride} /><small>{t("Available space")}: {ride.capacity}</small></div>{ride.myInquiryId ? <button className="button dark short" onClick={() => onOpenConversation(ride.myInquiryId!)}>{t("View request")}</button> : <button className="button moss short" onClick={() => { setSelected(ride); setMessage(""); }}>{t("Send request")}</button>}</article>)}</div> : <div className="empty-transports"><h2>{t("No carrier rides yet")}</h2><p>{t("New rides from transporters will appear here.")}</p></div>}{selected && <div className="ride-request-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !sending) setSelected(null); }}><section className="ride-request-dialog" role="dialog" aria-modal="true" aria-labelledby="ride-request-title"><button type="button" className="pickup-area-close ride-request-dialog-close" aria-label={t("Close")} disabled={sending} onClick={() => setSelected(null)}>×</button><h2 id="ride-request-title">{t("Request space")}</h2><TransportRoute from={selected.pickup} to={selected.delivery} short={false} /><p><CarrierRideSchedule ride={selected} /> · {t("Available space")}: {selected.capacity}</p><form noValidate onSubmit={sendRequest}><label>{t("Message")}<textarea autoFocus value={message} onChange={event => setMessage(event.target.value)} placeholder={t("Tell the carrier what you need transported.")} required /></label><p className="contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p><div><button className="quiet-link" type="button" disabled={sending} onClick={() => setSelected(null)}>{t("Cancel")}</button><button className="button moss short" disabled={sending || !message.trim()}>{sending ? t("Sending…") : t("Send request")}</button></div></form></section></div>}</section>;
+  return <section className="carrier-rides carrier-rides-marketplace"><div className="workspace-title"><div><h1>{t("Transports")}</h1></div></div>{error && <p className="transport-list-message error">{error}</p>}{loading ? <p className="transport-list-message">{t("Loading carrier rides…")}</p> : rides.length ? <div className="carrier-ride-list">{rides.map(ride => <article className="carrier-ride-card" key={ride.id}><div className="carrier-ride-card-profile" role="button" tabIndex={0} aria-label={`${t("View profile")}: ${ride.companyName || ride.carrierName}`} onClick={() => setProfileCarrierId(ride.carrierId)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setProfileCarrierId(ride.carrierId); } }}><b>{ride.companyName || ride.carrierName}</b><TransportRoute from={ride.pickup} to={ride.delivery} short={false} /><CarrierRideSchedule ride={ride} /><small>{t("Available space")}: {ride.capacity}</small></div>{ride.myInquiryId ? <button className="button dark short" onClick={() => onOpenConversation(ride.myInquiryId!)}>{t("Open")}</button> : <button className="button moss short" onClick={() => { setRequestingRide(ride); setMessage(""); }}>{t("Send request")}</button>}</article>)}</div> : <div className="empty-transports"><h2>{t("No carrier rides yet")}</h2><p>{t("New rides from transporters will appear here.")}</p></div>}{requestingRide && <div className="ride-request-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !sending) setRequestingRide(null); }}><section className="ride-request-dialog" role="dialog" aria-modal="true" aria-labelledby="ride-request-title"><button type="button" className="pickup-area-close ride-request-dialog-close" aria-label={t("Close")} disabled={sending} onClick={() => setRequestingRide(null)}>×</button><h2 id="ride-request-title">{t("Request space")}</h2><TransportRoute from={requestingRide.pickup} to={requestingRide.delivery} short={false} /><p><CarrierRideSchedule ride={requestingRide} /> · {t("Available space")}: {requestingRide.capacity}</p><form noValidate onSubmit={sendRequest}><label>{t("Message")}<textarea autoFocus value={message} onChange={event => setMessage(event.target.value)} placeholder={t("Tell the carrier what you need transported.")} required /></label><p className="contact-note">{t(CONTACT_DETAILS_RESTRICTED_MESSAGE)}</p><div><button className="quiet-link" type="button" disabled={sending} onClick={() => setRequestingRide(null)}>{t("Cancel")}</button><button className="button moss short" disabled={sending || !message.trim()}>{sending ? t("Sending…") : t("Send request")}</button></div></form></section></div>}{profileCarrierId && <PublicCarrierProfile carrierId={profileCarrierId} onClose={() => setProfileCarrierId("")} />}</section>;
 }
 
-function MyCarrierRides({ creating, onCreate, onDone, onCancel, embedded = false }: { creating: boolean; onCreate: () => void; onDone: () => void; onCancel: () => void; embedded?: boolean }) {
+function MyCarrierRides({ creating, onCreate, onDone, onCancel, onOpenConversation, embedded = false }: { creating: boolean; onCreate: () => void; onDone: () => void; onCancel: () => void; onOpenConversation: (inquiryId: string) => void; embedded?: boolean }) {
   const { t } = useLanguage();
   const [rides, setRides] = useState<CarrierRide[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [selectedRide, setSelectedRide] = useState<CarrierRide | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const [draft, setDraft] = useState({ pickup: "", delivery: "", departureDate: today, departureTime: "09:00", capacity: "" });
   const reload = useCallback(async () => {
@@ -1854,7 +1866,28 @@ function MyCarrierRides({ creating, onCreate, onDone, onCancel, embedded = false
     } catch (saveError) { setError(saveError instanceof Error ? saveError.message : t("Unable to create carrier ride")); } finally { setSaving(false); }
   };
   const rideForm = <form noValidate onSubmit={save}><label>{t("From")}<input value={draft.pickup} onChange={event => setDraft(current => ({ ...current, pickup: event.target.value }))} placeholder={t("e.g. Zagreb, Trešnjevka")} required /></label><label>{t("To")}<input value={draft.delivery} onChange={event => setDraft(current => ({ ...current, delivery: event.target.value }))} placeholder={t("e.g. Split city centre")} required /></label><div className="inline-inputs"><label>{t("Date")}<input type="date" min={today} value={draft.departureDate} onChange={event => setDraft(current => ({ ...current, departureDate: event.target.value }))} required /></label><label>{t("Time")}<input type="time" value={draft.departureTime} onChange={event => setDraft(current => ({ ...current, departureTime: event.target.value }))} required /></label></div><label>{t("Available space")}<input value={draft.capacity} onChange={event => setDraft(current => ({ ...current, capacity: event.target.value }))} placeholder={t("e.g. 2 m³ or 3 pallets")} required /></label>{error && <p className="transport-list-message error">{error}</p>}<button className="button moss full" disabled={saving}>{saving ? t("Saving…") : t("Publish ride")}</button></form>;
-  return <section className={`carrier-rides ${embedded ? "embedded-carrier-rides" : ""}`}>{!embedded && <div className="workspace-title"><div><h1>{t("My rides")}</h1><p>{t("Publish your available capacity so requesters can contact you directly.")}</p></div><button className="button moss short" onClick={onCreate}>{t("Add a ride")}</button></div>}{embedded && rides.length > 0 && <div className="carrier-rides-actions"><button className="button moss short" onClick={onCreate}>{t("Add a ride")}</button></div>}{error && <p className="transport-list-message error">{error}</p>}{loading ? <p className="transport-list-message">{t("Loading carrier rides…")}</p> : rides.length ? <div className="carrier-ride-list">{rides.map(ride => <article className="carrier-ride-card" key={ride.id}><div><TransportRoute from={ride.pickup} to={ride.delivery} short={false} /><CarrierRideSchedule ride={ride} /><small>{t("Available space")}: {ride.capacity}</small></div><span className="status searching">{t("Published")}</span></article>)}</div> : <div className="empty-transports"><h2>{t("No rides yet")}</h2><p>{t("Add a ride to show your available route and space to requesters.")}</p><button className="button moss" onClick={onCreate}>{t("Add a ride")}</button></div>}{creating && <div className="ride-request-backdrop ride-create-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !saving) onCancel(); }}><section className="ride-create-dialog" role="dialog" aria-modal="true" aria-labelledby="ride-create-title"><button type="button" className="pickup-area-close ride-request-dialog-close" aria-label={t("Close")} disabled={saving} onClick={onCancel}>×</button><header><h2 id="ride-create-title">{t("Add a ride")}</h2><p>{t("Enter a route as an address, city, or any plain text that describes your trip.")}</p></header>{rideForm}</section></div>}</section>;
+  return <section className={`carrier-rides ${embedded ? "embedded-carrier-rides" : ""}`}>{selectedRide ? <CarrierRideInquiries ride={selectedRide} onBack={() => setSelectedRide(null)} onOpenConversation={onOpenConversation} /> : <>{!embedded && <div className="workspace-title"><div><h1>{t("My rides")}</h1><p>{t("Publish your available capacity so requesters can contact you directly.")}</p></div><button className="button moss short" onClick={onCreate}>{t("Add a ride")}</button></div>}{embedded && rides.length > 0 && <div className="carrier-rides-actions"><button className="button moss short" onClick={onCreate}>{t("Add a ride")}</button></div>}{error && <p className="transport-list-message error">{error}</p>}{loading ? <p className="transport-list-message">{t("Loading carrier rides…")}</p> : rides.length ? <div className="carrier-ride-list">{rides.map(ride => <article className="carrier-ride-card list-item-link" key={ride.id} role="button" tabIndex={0} aria-label={`${t("Open")}: ${ride.pickup} — ${ride.delivery}`} onClick={() => setSelectedRide(ride)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedRide(ride); } }}><div><TransportRoute from={ride.pickup} to={ride.delivery} short={false} /><CarrierRideSchedule ride={ride} /><small>{t("Available space")}: {ride.capacity}</small></div><span className="status searching">{t("Published")}</span></article>)}</div> : <div className="empty-transports"><h2>{t("No rides yet")}</h2><p>{t("Add a ride to show your available route and space to requesters.")}</p><button className="button moss" onClick={onCreate}>{t("Add a ride")}</button></div>}{creating && <div className="ride-request-backdrop ride-create-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !saving) onCancel(); }}><section className="ride-create-dialog" role="dialog" aria-modal="true" aria-labelledby="ride-create-title"><button type="button" className="pickup-area-close ride-request-dialog-close" aria-label={t("Close")} disabled={saving} onClick={onCancel}>×</button><header><h2 id="ride-create-title">{t("Add a ride")}</h2><p>{t("Enter a route as an address, city, or any plain text that describes your trip.")}</p></header>{rideForm}</section></div>}</>}</section>;
+}
+
+function CarrierRideInquiries({ ride, onBack, onOpenConversation }: { ride: CarrierRide; onBack: () => void; onOpenConversation: (inquiryId: string) => void }) {
+  const { t } = useLanguage();
+  const [inquiries, setInquiries] = useState<CarrierRideInquiry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    const token = getAuthToken();
+    if (!token) return;
+    void fetch(`/api/carrier-rides/${ride.id}/inquiries`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }).then(async response => {
+      const payload = await response.json() as { inquiries?: CarrierRideInquiry[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || t("Unable to load offers"));
+      setInquiries(payload.inquiries || []);
+    }).catch(loadError => {
+      if (!(loadError instanceof DOMException && loadError.name === "AbortError")) setError(loadError instanceof Error ? loadError.message : t("Unable to load offers"));
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [ride.id, t]);
+  return <section className="carrier-ride-inquiries"><button type="button" className="quiet-link carrier-ride-inquiries-back" onClick={onBack}>← {t("My rides")}</button><header><div><h1>{ride.pickup} → {ride.delivery}</h1><p><CarrierRideSchedule ride={ride} /> · {t("Available space")}: {ride.capacity}</p></div></header><h2>{t("Offers")}</h2>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : inquiries.length ? <div className="carrier-ride-inquiry-list">{inquiries.map(inquiry => <article className="carrier-ride-inquiry" key={inquiry.id}><div><b>{inquiry.requesterName}</b>{inquiry.message && <p>“{inquiry.message}”</p>}<span className={`status ${inquiry.status === "confirmed" ? "booked" : inquiry.status === "closed" ? "rejected" : "searching"}`}>{t(inquiry.status === "confirmed" ? "Transport agreed" : inquiry.status === "closed" ? "Closed" : "Pending")}</span></div><button className="button dark short" onClick={() => onOpenConversation(inquiry.id)}>{t("Open")}</button></article>)}</div> : <div className="empty-transports"><h2>{t("No offers yet")}</h2></div>}</section>;
 }
 
 export function CarrierWorkspace() {
@@ -1876,10 +1909,10 @@ export function CarrierWorkspace() {
     setSelectedCarrierOffer(isOfferDetail ? routeState?.offer || null : null);
   }, [isJobDetail, isOfferDetail, isOfferForm, loc.pathname, routeState]);
   const go = (next: string, offerId?: string) => { setView(next); nav(next === "jobs" ? "/carrier" : `/carrier/${next}${offerId ? `?offer=${offerId}` : ""}`); };
-  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={job => nav(`/carrier/jobs/${job.id}`, { state: { job } })} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onOffer={() => nav(`/carrier/jobs/${selected.id}/offer`, { state: { job: selected } })} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onSent={offerId => go("messages", offerId)} />}{view === "offers" && !selectedCarrierOffer && <RealCarrierOffers initialTab={loc.pathname.includes("active") ? "active" : "offers"} onOpen={offer => nav(`/carrier/offers/${offer.id}`, { state: { offer } })} />}{view === "offers" && selectedCarrierOffer && <CarrierOfferDetail offer={selectedCarrierOffer} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
+  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={job => nav(`/carrier/jobs/${job.id}`, { state: { job } })} onOpenConversation={inquiryId => go("messages", inquiryId)} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onOffer={() => nav(`/carrier/jobs/${selected.id}/offer`, { state: { job: selected } })} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onSent={offerId => go("messages", offerId)} />}{view === "offers" && !selectedCarrierOffer && <RealCarrierOffers onOpen={offer => nav(`/carrier/offers/${offer.id}`, { state: { offer } })} />}{view === "offers" && selectedCarrierOffer && <CarrierOfferDetail offer={selectedCarrierOffer} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
 }
 
-function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => void }) {
+function CarrierJobs({ onOpen, onOpenConversation }: { onOpen: (request: MarketplaceTransport) => void; onOpenConversation: (inquiryId: string) => void }) {
   const { language, t } = useLanguage();
   const [transports, setTransports] = useState<MarketplaceTransport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1890,6 +1923,8 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
   const [draftPickupArea, setDraftPickupArea] = useState<AddressLocation | null>(null);
   const [draftPickupRadius, setDraftPickupRadius] = useState(25);
   const [draftDistanceFilter, setDraftDistanceFilter] = useState<number | null>(null);
+  const [notifyOnMatch, setNotifyOnMatch] = useState(false);
+  const [draftNotifyOnMatch, setDraftNotifyOnMatch] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [isPickupAreaOpen, setIsPickupAreaOpen] = useState(false);
   const [tab, setTab] = useState<"available" | "mine">("available");
@@ -1928,7 +1963,7 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     window.addEventListener("vanscout-push", refreshMatchingTransports);
     return () => window.removeEventListener("vanscout-push", refreshMatchingTransports);
   }, [loadPage]);
-  const persistSearchPreferences = useCallback((preferences: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number }) => {
+  const persistSearchPreferences = useCallback((preferences: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number; notifyOnMatch: boolean }) => {
     if (!preferencesLoaded) return;
     const token = getAuthToken();
     if (!token) return;
@@ -1943,11 +1978,12 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     if (!token) { setPreferencesLoaded(true); return; }
     void fetch("/api/carrier-search-preferences", { headers: { Authorization: `Bearer ${token}` } })
       .then(async response => {
-        const payload = await response.json() as { preferences?: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number } | null };
+        const payload = await response.json() as { preferences?: { distanceKm: number | null; pickupArea: AddressLocation | null; pickupRadiusKm: number; notifyOnMatch: boolean } | null };
         if (!response.ok || !payload.preferences) return;
         setDistanceFilter(payload.preferences.distanceKm);
         setPickupArea(payload.preferences.pickupArea);
         setPickupRadius(Math.min(payload.preferences.pickupRadiusKm, MAX_PICKUP_RADIUS_KM));
+        setNotifyOnMatch(payload.preferences.notifyOnMatch);
       })
       .finally(() => setPreferencesLoaded(true));
   }, []);
@@ -1961,13 +1997,16 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     setDraftPickupArea(pickupArea);
     setDraftPickupRadius(pickupRadius);
     setDraftDistanceFilter(distanceFilter);
+    setDraftNotifyOnMatch(notifyOnMatch);
     setIsPickupAreaOpen(true);
   };
   const applyPickupArea = () => {
+    const shouldNotify = draftNotifyOnMatch && Boolean(draftPickupArea || draftDistanceFilter !== null);
     setDistanceFilter(draftDistanceFilter);
     setPickupArea(draftPickupArea);
     setPickupRadius(draftPickupRadius);
-    persistSearchPreferences({ distanceKm: draftDistanceFilter, pickupArea: draftPickupArea, pickupRadiusKm: draftPickupRadius });
+    setNotifyOnMatch(shouldNotify);
+    persistSearchPreferences({ distanceKm: draftDistanceFilter, pickupArea: draftPickupArea, pickupRadiusKm: draftPickupRadius, notifyOnMatch: shouldNotify });
     setIsPickupAreaOpen(false);
   };
   const clearPickupArea = () => {
@@ -1995,8 +2034,8 @@ function CarrierJobs({ onOpen }: { onOpen: (request: MarketplaceTransport) => vo
     <div className="workspace-title jobs-title">
       <h1>{t(tab === "available" ? "Available transports" : "My rides")}</h1><div className="jobs-actions"><div className="tabs jobs-tabs" role="group" aria-label={t("Available transports")}><button className={tab === "available" ? "selected" : ""} aria-pressed={tab === "available"} onClick={() => { setTab("available"); setCreatingRide(false); }}>{t("Available transports")}</button><button className={tab === "mine" ? "selected" : ""} aria-pressed={tab === "mine"} onClick={() => setTab("mine")}>{t("My rides")}</button></div>{tab === "available" && <button type="button" className="pickup-area-trigger filters-trigger" onClick={openPickupAreaDialog} aria-expanded={isPickupAreaOpen} aria-label={t("Filters")}><b>{t("Filters")}</b></button>}</div>
     </div>
-    {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Filters")}><div className="pickup-area-panel-heading"><div><h2>{t("Filters")}</h2><p>{t("Narrow available transports by route distance and pickup area.")}</p></div><button type="button" className="pickup-area-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close")}>×</button></div><label className="job-filter-field job-distance-filter transport-length-filter"><span><span>{t("Transport length")}</span><strong>{draftDistanceFilter !== null && draftSelectedDistance < maximumRouteDistance ? t("Up to {distance} km", { distance: draftSelectedDistance }) : t("Any distance")}</strong></span><input type="range" min="10" max={maximumRouteDistance} step="10" value={draftSelectedDistance} onChange={event => setDraftDistanceFilter(Number(event.target.value))} aria-valuetext={draftDistanceFilter !== null && draftSelectedDistance < maximumRouteDistance ? t("Up to {distance} km", { distance: draftSelectedDistance }) : t("Any distance")} /></label><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={draftPickupArea} onChange={setDraftPickupArea} showSearch={false} showCurrentLocation={false} radiusKm={draftPickupRadius} radiusControl={{ label: t("Pickup radius"), valueLabel: t("Within {distance} km", { distance: draftPickupRadius }), min: 5, max: MAX_PICKUP_RADIUS_KM, step: 5, onChange: setDraftPickupRadius }} /><div className="pickup-area-actions">{(draftPickupArea || draftDistanceFilter !== null) && <button type="button" className="quiet-link" onClick={() => { clearPickupArea(); setDraftDistanceFilter(null); }}>{t("Clear filters")}</button>}<button type="button" className="button moss pickup-area-apply" onClick={applyPickupArea}>{t("Apply")}</button></div></section></div>}
-    {tab === "mine" ? <MyCarrierRides embedded creating={creatingRide} onCreate={() => setCreatingRide(true)} onDone={() => setCreatingRide(false)} onCancel={() => setCreatingRide(false)} /> : <>{loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? <div className="transport-data-list">{filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>)}</div> : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}{hasMore && <button type="button" className="button dark load-more-transports" disabled={loadingMore} onClick={loadMore}>{loadingMore ? t("Loading more…") : t("Load more")}</button>}</>}
+    {isPickupAreaOpen && <div className="pickup-area-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsPickupAreaOpen(false); }}><section className="pickup-area-panel" role="dialog" aria-modal="true" aria-label={t("Filters")}><div className="pickup-area-panel-heading"><div><h2>{t("Filters")}</h2><p>{t("Narrow available transports by route distance and pickup area.")}</p></div><button type="button" className="pickup-area-close" onClick={() => setIsPickupAreaOpen(false)} aria-label={t("Close")}>×</button></div><label className="job-filter-field job-distance-filter transport-length-filter"><span><span>{t("Transport length")}</span><strong>{draftDistanceFilter !== null && draftSelectedDistance < maximumRouteDistance ? t("Up to {distance} km", { distance: draftSelectedDistance }) : t("Any distance")}</strong></span><input type="range" min="10" max={maximumRouteDistance} step="10" value={draftSelectedDistance} onChange={event => setDraftDistanceFilter(Number(event.target.value))} aria-valuetext={draftDistanceFilter !== null && draftSelectedDistance < maximumRouteDistance ? t("Up to {distance} km", { distance: draftSelectedDistance }) : t("Any distance")} /></label><AddressPicker label={t("Pickup area")} placeholder={t("Search for an address, business or landmark")} value={draftPickupArea} onChange={setDraftPickupArea} showSearch={false} showCurrentLocation={false} radiusKm={draftPickupRadius} radiusControl={{ label: t("Pickup radius"), valueLabel: t("Within {distance} km", { distance: draftPickupRadius }), min: 5, max: MAX_PICKUP_RADIUS_KM, step: 5, onChange: setDraftPickupRadius }} /><div className="filter-notification-setting"><span>{t("Notify me about matching transports")}</span><button type="button" className="notification-toggle" role="switch" aria-checked={draftNotifyOnMatch} aria-label={t("Notify me about matching transports")} disabled={!draftPickupArea && draftDistanceFilter === null} onClick={() => setDraftNotifyOnMatch(current => !current)}><span /></button></div><div className="pickup-area-actions">{(draftPickupArea || draftDistanceFilter !== null || draftNotifyOnMatch) && <button type="button" className="quiet-link" onClick={() => { clearPickupArea(); setDraftDistanceFilter(null); setDraftNotifyOnMatch(false); }}>{t("Clear filters")}</button>}<button type="button" className="button moss pickup-area-apply" onClick={applyPickupArea}>{t("Apply")}</button></div></section></div>}
+    {tab === "mine" ? <MyCarrierRides embedded creating={creatingRide} onCreate={() => setCreatingRide(true)} onDone={() => setCreatingRide(false)} onCancel={() => setCreatingRide(false)} onOpenConversation={onOpenConversation} /> : <>{loading ? <p className="transport-list-message">{t("Loading transports…")}</p> : error ? <p className="transport-list-message error">{error}</p> : filteredTransports.length ? <div className="transport-data-list">{filteredTransports.map(request => <article className="job list-item-link" key={request.id} role="button" tabIndex={0} aria-label={`${t("View job")}: ${request.itemName}`} onClick={() => onOpen(request)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(request); } }}><TransportImage request={request} /><div><h3 className="job-title">{request.itemName}</h3><TransportRoute from={request.pickup.formatted} to={request.delivery.formatted} short /><span>{request.distanceKm} km</span><span>{request.preferredDateFrom ? formatTransportDates(request.preferredDateFrom, request.preferredDateTo, language) : t(request.timing)}</span><span>{formatTransportMeasurements(request, language, true)}</span></div><b>{request.offerCount} {t("offers")}</b><span className={`status list-item-status ${transportStatusClass(request.status, request.preferredDateFrom, request.preferredDateTo)}`}>{t(transportStatusLabel(request.status, request.preferredDateFrom, request.preferredDateTo))}</span></article>)}</div> : <div className="empty-transports"><h2>{hasActiveFilters ? t("No transports match your filters") : t("No available transports")}</h2><p>{hasActiveFilters ? t("Try adjusting or clearing your filters.") : t("New customer requests will appear here.")}</p></div>}{hasMore && <button type="button" className="button dark load-more-transports" disabled={loadingMore} onClick={loadMore}>{loadingMore ? t("Loading more…") : t("Load more")}</button>}</>}
   </section>;
 }
 
@@ -2062,24 +2101,23 @@ function CarrierOfferDetail({ offer, onOpenChat }: { offer: CarrierOfferRow; onO
   return <section className="carrier-offer-detail"><header><div><span className={`status large ${statusTone}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span><h1>{offer.itemName}</h1><TransportRoute from={offer.pickup} to={offer.delivery} short /></div><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-detail-price" /></header><div className="carrier-offer-facts"><div><span>{t("Customer")}</span><b>{offer.requesterName}</b></div><div><span>{t("Available date")}</span><b>{formatTransportDates(offer.availableDate, null, language)}</b></div></div><button className="button dark" onClick={() => onOpenChat(offer.id)}>{t("Open chat")}</button></section>;
 }
 
-function RealCarrierOffers({ initialTab = "offers", onOpen }: { initialTab?: "offers" | "active"; onOpen: (offer: CarrierOfferRow) => void }) {
+function RealCarrierOffers({ onOpen }: { onOpen: (offer: CarrierOfferRow) => void }) {
   const { language, t } = useLanguage();
   const [offers, setOffers] = useState<CarrierOfferRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"offers" | "active">(initialTab);
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
     setLoading(true);
     setError("");
-    void fetch(`/api/offers${tab === "active" ? "?status=confirmed" : ""}`, { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
+    void fetch("/api/offers", { headers: { Authorization: `Bearer ${token}` } }).then(async response => {
       const payload = await response.json() as { offers?: CarrierOfferRow[]; error?: string };
       if (!response.ok) throw new Error(payload.error || t("Unable to load offers"));
       setOffers(payload.offers || []);
     }).catch(loadError => setError(loadError instanceof Error ? loadError.message : t("Unable to load offers"))).finally(() => setLoading(false));
-  }, [tab, t]);
-  return <section className="my-offers"><div className="workspace-title"><div><h1>{t("My offers")}</h1></div><div className="tabs" role="group" aria-label={t("My offers")}><button className={tab === "offers" ? "selected" : ""} aria-pressed={tab === "offers"} onClick={() => setTab("offers")}>{t("My offers")}</button><button className={tab === "active" ? "selected" : ""} aria-pressed={tab === "active"} onClick={() => setTab("active")}>{t("Active transports")}</button></div></div>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : offers.length ? offers.map(offer => <article className="list-item-link" key={offer.id} role="button" tabIndex={0} aria-label={`${t("View offer")}: ${offer.itemName}`} onClick={() => onOpen(offer)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(offer); } }}><ItemImage label={offer.itemName} /><div className="carrier-offer-details"><h3 title={offer.itemName}>{offer.itemName}</h3><TransportRoute from={offer.pickup} to={offer.delivery} short /><small>{offer.requesterName} · {formatTransportDates(offer.availableDate, null, language)}</small></div><div className="carrier-offer-summary"><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-price" /><span className={`status list-item-status ${transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo)}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span></div></article>) : <div className="empty-transports"><h2>{t(tab === "active" ? "No active transports" : "No offers yet")}</h2><p>{t(tab === "active" ? "Mutually agreed transports will appear here." : "Offers you send to customers will appear here.")}</p></div>}</section>;
+  }, [t]);
+  return <section className="my-offers"><div className="workspace-title"><div><h1>{t("Sent offers")}</h1></div></div>{loading ? <p className="transport-list-message">{t("Loading offers…")}</p> : error ? <p className="transport-list-message error">{error}</p> : offers.length ? offers.map(offer => <article className="list-item-link" key={offer.id} role="button" tabIndex={0} aria-label={`${t("View offer")}: ${offer.itemName}`} onClick={() => onOpen(offer)} onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(offer); } }}><ItemImage label={offer.itemName} /><div className="carrier-offer-details"><h3 title={offer.itemName}>{offer.itemName}</h3><TransportRoute from={offer.pickup} to={offer.delivery} short /><small>{offer.requesterName} · {formatTransportDates(offer.availableDate, null, language)}</small></div><div className="carrier-offer-summary"><OfferPrice priceCents={offer.priceCents} vatIncluded={offer.vatIncluded} className="carrier-offer-price" /><span className={`status list-item-status ${transportStatusClass(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo)}`}>{t(transportStatusLabel(offer.transportStatus, offer.preferredDateFrom, offer.preferredDateTo))}</span></div></article>) : <div className="empty-transports"><h2>{t("No offers yet")}</h2><p>{t("Offers you send to customers will appear here.")}</p></div>}</section>;
 }
 
 function CarrierProfileEditor() {
@@ -2091,6 +2129,7 @@ function CarrierProfileEditor() {
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
@@ -2145,7 +2184,8 @@ function CarrierProfileEditor() {
   };
   const initials = profile?.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
   const profileChanged = profile !== null && (companyName.trim() !== profile.companyName || bio.trim() !== profile.bio || profileImage !== null || files.length > 0 || imageIds.join(",") !== profile.imageIds.join(","));
-  return <section className="carrier-profile real-carrier-profile">
+  return <section className="carrier-profile real-carrier-profile">{settingsOpen ? <ProfileSettingsScreen onBack={() => setSettingsOpen(false)} /> : <>
+    <ProfileSettingsButton onOpen={() => setSettingsOpen(true)} />
     <div className="profile-head">
       <label className="profile-photo-control"><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" aria-label={t("Change photo")} onChange={event => { setProfileImage(event.target.files?.[0] || null); event.target.value = ""; }} /><span className="avatar large">{profileImage ? <FilePreview className="profile-photo" file={profileImage} alt={profile?.carrierName || ""} /> : profile?.profileImageId ? <PrivateImage className="profile-photo" src={`/api/carrier-profile/images/${profile.profileImageId}`} alt={profile.carrierName} /> : initials}<span className="profile-photo-overlay" aria-hidden="true">{t("Change photo")}</span></span></label>
       <div><h1>{profile?.carrierName || t("Your profile")}</h1><div className="profile-stats"><span>{profile?.completedTransports || 0} {t("completed transports")}</span><span>{new Intl.NumberFormat().format(profile?.kilometresTravelled || 0)} km {t("travelled")}</span></div></div>
@@ -2163,11 +2203,9 @@ function CarrierProfileEditor() {
     </form>
     {profileChanged && <div className="profile-save-float"><button className="button moss" type="submit" form="carrier-profile-form">{t("Save profile")}</button></div>}
     {profile && <CarrierReviews profile={profile} />}
-    <ProfileLanguageSettings />
-    <PushNotificationSettings includeMatchingTransports />
     <VehicleManager vehicles={profile?.vehicles || []} onChange={vehicles => setProfile(current => current ? { ...current, vehicles } : current)} />
     <DeleteAccountControl />
-  </section>;
+  </>}</section>;
 }
 
 function VehicleManager({ vehicles, onChange }: { vehicles: CarrierVehicle[]; onChange: (vehicles: CarrierVehicle[]) => void }) {

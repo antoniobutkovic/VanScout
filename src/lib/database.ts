@@ -165,6 +165,7 @@ async function ensureSchema() {
           pickup_longitude DOUBLE PRECISION,
           pickup_city TEXT,
           pickup_radius_km INTEGER NOT NULL DEFAULT 25 CHECK (pickup_radius_km BETWEEN 5 AND 3000),
+          notify_on_match BOOLEAN NOT NULL DEFAULT FALSE,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
@@ -181,6 +182,7 @@ async function ensureSchema() {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_push_subscriptions_user_idx ON vanscout_push_subscriptions (user_id)`;
+      await sql`ALTER TABLE vanscout_carrier_search_preferences ADD COLUMN IF NOT EXISTS notify_on_match BOOLEAN NOT NULL DEFAULT FALSE`;
       // Existing databases retain the old 5,000 km constraint after CREATE TABLE
       // IF NOT EXISTS. Cap saved values before tightening the check constraint.
       await sql`UPDATE vanscout_carrier_search_preferences SET pickup_radius_km = 3000 WHERE pickup_radius_km > 3000`;
@@ -374,13 +376,29 @@ async function ensureSchema() {
           carrier_ride_id TEXT NOT NULL REFERENCES vanscout_carrier_rides(id) ON DELETE CASCADE,
           requester_id TEXT NOT NULL REFERENCES vanscout_users(id) ON DELETE CASCADE,
           message TEXT NOT NULL CONSTRAINT vanscout_carrier_ride_inquiries_message_check CHECK (LENGTH(message) BETWEEN 1 AND 10000),
-          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'closed')),
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'closed')),
+          carrier_agreed_at TIMESTAMPTZ,
+          requester_agreed_at TIMESTAMPTZ,
+          confirmed_at TIMESTAMPTZ,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (carrier_ride_id, requester_id)
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_carrier_ride_inquiries_requester_idx ON vanscout_carrier_ride_inquiries (requester_id, updated_at DESC)`;
+      await sql`ALTER TABLE vanscout_carrier_ride_inquiries ADD COLUMN IF NOT EXISTS carrier_agreed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE vanscout_carrier_ride_inquiries ADD COLUMN IF NOT EXISTS requester_agreed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE vanscout_carrier_ride_inquiries ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ`;
+      await sql`
+        DO $$
+        BEGIN
+          ALTER TABLE vanscout_carrier_ride_inquiries
+            DROP CONSTRAINT IF EXISTS vanscout_carrier_ride_inquiries_status_check;
+          ALTER TABLE vanscout_carrier_ride_inquiries
+            ADD CONSTRAINT vanscout_carrier_ride_inquiries_status_check
+            CHECK (status IN ('pending', 'confirmed', 'closed'));
+        END $$;
+      `;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_carrier_ride_messages (
           id TEXT PRIMARY KEY,
