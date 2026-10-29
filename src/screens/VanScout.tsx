@@ -34,6 +34,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TRANSPORT_PAGE_SIZE = 20;
 const ITEM_NAME_MAX_LENGTH = 200;
 const MAX_PICKUP_RADIUS_KM = 3_000;
+const MESSAGE_BADGE_POLL_INTERVAL_MS = 15_000;
 
 function Arrow() { return null; }
 function SettingsIcon() { return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Z" /><path d="M19.1 13.6a7.6 7.6 0 0 0 .05-1.6 7.6 7.6 0 0 0-.05-1.6l2-1.5-2-3.46-2.35.95a8.1 8.1 0 0 0-2.76-1.6L13.65 2h-4l-.34 2.79a8.1 8.1 0 0 0-2.76 1.6L4.2 5.44 2.2 8.9l2 1.5a7.6 7.6 0 0 0-.05 1.6 7.6 7.6 0 0 0 .05 1.6l-2 1.5 2 3.46 2.35-.95a8.1 8.1 0 0 0 2.76 1.6L9.65 22h4l.34-2.79a8.1 8.1 0 0 0 2.76-1.6l2.35.95 2-3.46-2-1.5Z" /></svg>; }
@@ -318,6 +319,17 @@ function useHasMessages(kind?: "customer" | "carrier") {
       }
     };
     window.addEventListener("vanscout-messages-read", handleMessagesRead);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const handlePush = (event: Event) => {
+      const notification = (event as CustomEvent<{ tag?: string }>).detail;
+      if (notification?.tag?.startsWith("message-")) void load();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("vanscout-push", handlePush);
+    const poll = window.setInterval(refreshWhenVisible, MESSAGE_BADGE_POLL_INTERVAL_MS);
     void (async () => {
       try {
         const user = await fetchSessionUser();
@@ -356,6 +368,10 @@ function useHasMessages(kind?: "customer" | "carrier") {
     return () => {
       cancelled = true;
       window.removeEventListener("vanscout-messages-read", handleMessagesRead);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("vanscout-push", handlePush);
+      window.clearInterval(poll);
       if (realtimeClient && userChannelName && realtimeListener) realtimeClient.channels.get(userChannelName).unsubscribe(realtimeListener);
       realtimeClient?.close();
     };
