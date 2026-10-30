@@ -10,6 +10,7 @@ import { Picker } from "../components/Picker";
 import { AddressPicker } from "../components/AddressPicker";
 import { LegalDocumentContent } from "../components/LegalDocumentContent";
 import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-phone";
+import { normalizePhoneNumber } from "../lib/phone-number";
 import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from "../lib/client-auth";
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
 import { offerPriceFromEnteredAmount, offerPriceFromTotal } from "../lib/offer-pricing";
@@ -251,24 +252,6 @@ function PhoneNumberField({ country, localNumber, onCountryChange, onNumberChang
     const digitsOnly = raw.replace(/\D/g, "");
     onNumberChange(new AsYouType(country).input(digitsOnly));
   }} placeholder={t("91 234 5678")} /></div>{error && <span className="field-error" role="alert">{error}</span>}</div>;
-}
-
-function normalizedPhoneNumber(country: CountryCode, input: string, allowTestNumber: boolean) {
-  const parsed = parsePhoneNumberFromString(input, country);
-  const type = parsed?.getType();
-  if (parsed?.isValid() && parsed.country === country && (!type || type === "MOBILE" || type === "FIXED_LINE_OR_MOBILE")) {
-    return parsed.number;
-  }
-
-  if (!allowTestNumber) return null;
-
-  // Firebase test mode accepts fictional numbers configured in the Firebase
-  // console, which may not exist in libphonenumber metadata.
-  const digits = input.replace(/\D/g, "");
-  const dialCode = getCountryCallingCode(country);
-  const international = digits.startsWith(dialCode) ? digits : `${dialCode}${digits}`;
-  const e164 = `+${international}`;
-  return e164.startsWith(`+${dialCode}`) && /^\+[1-9]\d{7,14}$/.test(e164) ? e164 : null;
 }
 
 function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
@@ -847,7 +830,7 @@ export function Registration() {
       const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
       const configPayload = await configResponse.json() as AuthConfig;
       if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error("Phone verification unavailable");
-      const phoneNumber = normalizedPhoneNumber(country, localNumber, configPayload.firebase.testMode);
+      const phoneNumber = normalizePhoneNumber(country, localNumber, configPayload.firebase.testMode);
       if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
 
       const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ phoneNumber }) });
