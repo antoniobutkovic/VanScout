@@ -44,6 +44,29 @@ p { line-height: 1.5; color: var(--muted); }
 .notification-settings small { display: block; margin-top: 9px; color: var(--moss); font-size: 12px; font-weight: 700; }
 .notification-settings small.error { color: var(--red); }
 .notification-ios-steps { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.notification-heading { display: flex; align-items: center; gap: 8px; }
+.notification-info-button { display: grid; width: 20px; height: 20px; place-items: center; flex: 0 0 auto; border: 1px solid var(--stone); border-radius: 50%; background: transparent; color: var(--moss); font-family: Georgia, serif; font-size: 13px; font-weight: 700; line-height: 1; }
+.notification-info-button:hover { border-color: var(--moss); background: var(--moss-soft); }
+.notification-info-button:focus-visible { outline: 3px solid var(--clay); outline-offset: 3px; }
+.notification-info-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(22,30,19,.36); }
+.notification-info-dialog { position: relative; width: min(100%, 560px); max-height: calc(100dvh - 48px); overflow-y: auto; padding: 32px; background: var(--paper); box-shadow: 0 22px 60px rgba(22,30,19,.25); }
+.notification-info-dialog h2 { margin: 0 38px 13px 0; font-size: 25px; }
+.notification-info-dialog p { margin: 0; font-size: 14px; }
+.notification-info-dialog ul { display: grid; gap: 16px; margin: 24px 0; padding: 0; list-style: none; }
+.notification-info-dialog li { display: grid; gap: 4px; padding-left: 14px; border-left: 2px solid var(--moss-soft); }
+.notification-info-dialog li b { font-size: 13px; }
+.notification-info-dialog li span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.notification-info-dialog .notification-info-note { color: var(--moss); font-size: 13px; font-weight: 700; }
+.notification-info-close { position: absolute; top: 19px; right: 19px; }
+.notification-onboarding-dialog { width: min(100%, 620px); }
+.notification-onboarding-dialog .eyebrow { margin-bottom: 12px; }
+.notification-onboarding-dialog h2 { font-size: clamp(1.9rem, 5vw, 2.7rem); }
+.notification-onboarding-dialog > p { max-width: 500px; }
+.notification-onboarding-enable { margin: 24px 0 0; }
+.notification-onboarding-warning { margin-top: 20px !important; padding: 13px 14px; border-left: 2px solid var(--clay); background: var(--mist); color: var(--ink) !important; }
+.notification-onboarding-dialog .auth-message { margin: 12px 0 0; }
+.notification-onboarding-later { margin-top: 22px; }
+.notification-onboarding-later-note { margin-top: 7px !important; font-size: 12px !important; }
 .profile-language-settings { align-items: center; }
 .profile-language-settings .profile-language-picker { width: 190px; margin: 0; flex: 0 0 auto; }
 .profile-language-settings .picker-trigger { min-height: 46px; }

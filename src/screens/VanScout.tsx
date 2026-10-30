@@ -1207,7 +1207,7 @@ export function CustomerWorkspace() {
     return () => controller.abort();
   }, [filter, nav, selectedTransportId, t]);
 
-  return <div className="app"><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title transport-workspace-title"><div><h1>{t("Requests")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => nav(`/customer/requests/${request.id}`)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onOpenMessages={offerId => go("messages", offerId)} />}{view === "rides" && <CarrierRideMarketplace onOpenConversation={inquiryId => go("messages", inquiryId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
+  return <div className="app"><NotificationOnboarding /><Topbar kind="customer" active={view === "requests" ? "requests" : view} /><main className="workspace">{view === "requests" && !selectedTransport && <section className="requests"><div className="workspace-title transport-workspace-title"><div><h1>{t("Requests")}</h1></div><div className="tabs" role="group" aria-label={t("Filter transports")}><button className={filter === "active" ? "selected" : ""} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>{t("Active")}</button><button className={filter === "completed" ? "selected" : ""} aria-pressed={filter === "completed"} onClick={() => setFilter("completed")}>{t("Completed")}</button></div></div>{loadingTransports ? <p className="transport-list-message" role="status">{t("Loading transports…")}</p> : transportError ? <p className="transport-list-message error" role="alert">{transportError}</p> : transports.length ? <div className="rows">{transports.map(request => <RequestRow request={request} onClick={() => nav(`/customer/requests/${request.id}`)} key={request.id} />)}</div> : <div className="empty-transports"><h2>{t(filter === "completed" ? "No completed transports" : "No active transports")}</h2><p>{t(filter === "completed" ? "Your completed transports will appear here." : "Publish a request to start receiving offers from carriers.")}</p>{filter === "active" && <Link className="button moss" to="/create-request" state={{ returnTo: "/customer" }}>{t("Create a request")}</Link>}</div>}</section>}{view === "requests" && selectedTransport && <RequestDetail request={selectedTransport} onOpenMessages={offerId => go("messages", offerId)} />}{view === "rides" && <CarrierRideMarketplace onOpenConversation={inquiryId => go("messages", inquiryId)} />}{view === "messages" && <LiveMessages />}{view === "profile" && <CustomerProfile />}</main></div>;
 }
 
 function RequestDetail({ request, onOpenMessages }: { request: TransportRequest; onOpenMessages: (offerId: string) => void }) {
@@ -1636,12 +1636,82 @@ function requiresHomeScreenInstallForPush() {
   return !window.matchMedia("(display-mode: standalone)").matches && !standaloneNavigator.standalone;
 }
 
+function NotificationPlatformGuidance() {
+  const { t } = useLanguage();
+  return <><ul><li><b>{t("Desktop browsers")}</b><span>{t("On macOS and Windows, allow notifications for your browser in the system settings. Focus, Do Not Disturb, notification summaries, or browser settings can still silence alerts.")}</span></li><li><b>{t("Android")}</b><span>{t("Allow notifications for your browser or the installed VanScout app. Battery-saving settings may delay delivery.")}</span></li><li><b>{t("iPhone and iPad")}</b><span>{t("Add VanScout to your Home Screen, open it from there, and enable notifications. Focus and notification summaries can still delay or hide alerts.")}</span></li></ul><p className="notification-info-note">{t("If alerts do not appear, check both your device and browser notification settings.")}</p></>;
+}
+
+function NotificationOnboarding() {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [homeScreenRequired, setHomeScreenRequired] = useState(false);
+  const [supported, setSupported] = useState(true);
+  const requestHeaders = (): Record<string, string> => {
+    const token = getAuthToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+    void (async () => {
+      try {
+        const response = await fetch("/api/me/notification-prompt", { headers: { Authorization: `Bearer ${token}` } });
+        const payload = await response.json() as { shouldPrompt?: boolean };
+        if (!response.ok || !payload.shouldPrompt) return;
+        await fetch("/api/me/notification-prompt", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+        setHomeScreenRequired(requiresHomeScreenInstallForPush());
+        setSupported(window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window);
+        setOpen(true);
+      } catch {
+        // A temporary onboarding failure must never block access to the workspace.
+      }
+    })();
+  }, []);
+  const enable = async () => {
+    if (homeScreenRequired || !supported) return;
+    setBusy(true); setError("");
+    try {
+      const configResponse = await fetch("/api/push/config", { headers: requestHeaders() });
+      const config = await configResponse.json() as { enabled?: boolean; publicKey?: string | null };
+      if (!configResponse.ok || !config.enabled || !config.publicKey) throw new Error("Notifications are unavailable");
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setError(t("Notifications are blocked in your browser settings."));
+        return;
+      }
+      const registration = await navigator.serviceWorker.register("/vanscout-push-worker.js");
+      await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+      });
+      const subscriptionResponse = await fetch("/api/push/subscription", {
+        method: "POST",
+        headers: { ...requestHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(subscription),
+      });
+      if (!subscriptionResponse.ok) throw new Error("Unable to save notification subscription");
+      setOpen(false);
+    } catch {
+      setError(t("Unable to enable notifications"));
+    } finally { setBusy(false); }
+  };
+  if (!open) return null;
+  const unavailableMessage = homeScreenRequired
+    ? t("To enable notifications on iPhone or iPad, first add VanScout to your Home Screen. Open VanScout from there, then enable notifications in Profile.")
+    : t("Notifications are not available on this device or browser. You can change this later in Profile → Notifications if support becomes available.");
+  return <div className="notification-info-backdrop notification-onboarding-backdrop" role="presentation"><section className="notification-info-dialog notification-onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="notification-onboarding-title"><button type="button" className="pickup-area-close notification-info-close" aria-label={t("Close")} disabled={busy} onClick={() => setOpen(false)}>×</button><p className="eyebrow">{t("Notifications")}</p><h2 id="notification-onboarding-title">{t("Stay on top of every transport")}</h2><p>{t("Turn on notifications so you do not miss a new message, request, offer, or transport update.")}</p>{homeScreenRequired || !supported ? <p className="notification-onboarding-warning">{unavailableMessage}</p> : <button type="button" className="button moss notification-onboarding-enable" disabled={busy} onClick={() => void enable()}>{busy ? t("Enabling…") : t("Enable notifications")}</button>}{error && <p className="auth-message error" role="alert">{error}</p>}<NotificationPlatformGuidance /><button type="button" className="quiet-link notification-onboarding-later" disabled={busy} onClick={() => setOpen(false)}>{t("Not now")}</button><p className="notification-onboarding-later-note">{t("You can turn this on later in Profile → Notifications.")}</p></section></div>;
+}
+
 function PushNotificationSettings() {
   const { t } = useLanguage();
   const [status, setStatus] = useState<"checking" | "ready" | "enabled" | "blocked" | "unsupported" | "ios-home-screen-required" | "unavailable" | "error">("checking");
   const [publicKey, setPublicKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [infoOpen, setInfoOpen] = useState(false);
   const requestHeaders = (): Record<string, string> => {
     const token = getAuthToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -1727,7 +1797,7 @@ function PushNotificationSettings() {
         : message;
   const needsHomeScreenInstructions = status === "ios-home-screen-required";
   const canToggle = status === "ready" || status === "enabled";
-  return <section className="notification-settings"><div><h2>{t("Notifications")}</h2>{statusMessage && <small className={status === "error" || status === "blocked" ? "error" : ""}>{statusMessage}</small>}{needsHomeScreenInstructions && <ol className="notification-ios-steps"><li>{t("Open VanScout in Safari, Chrome, or another browser with Add to Home Screen.")}</li><li>{t("Tap Share, then choose Add to Home Screen.")}</li><li>{t("Open VanScout from the Home Screen and enable notifications in your profile.")}</li></ol>}</div>{canToggle && <button type="button" className="notification-toggle" role="switch" aria-checked={status === "enabled"} aria-label={t(status === "enabled" ? "Disable notifications" : "Enable notifications")} disabled={busy} onClick={() => status === "enabled" ? void disable() : void enable()}><span /></button>}</section>;
+  return <><section className="notification-settings"><div><div className="notification-heading"><h2>{t("Notifications")}</h2><button type="button" className="notification-info-button" aria-label={t("About notifications")} aria-expanded={infoOpen} onClick={() => setInfoOpen(true)}>i</button></div>{statusMessage && <small className={status === "error" || status === "blocked" ? "error" : ""}>{statusMessage}</small>}{needsHomeScreenInstructions && <ol className="notification-ios-steps"><li>{t("Open VanScout in Safari, Chrome, or another browser with Add to Home Screen.")}</li><li>{t("Tap Share, then choose Add to Home Screen.")}</li><li>{t("Open VanScout from the Home Screen and enable notifications in your profile.")}</li></ol>}</div>{canToggle && <button type="button" className="notification-toggle" role="switch" aria-checked={status === "enabled"} aria-label={t(status === "enabled" ? "Disable notifications" : "Enable notifications")} disabled={busy} onClick={() => status === "enabled" ? void disable() : void enable()}><span /></button>}</section>{infoOpen && <div className="notification-info-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setInfoOpen(false); }}><section className="notification-info-dialog" role="dialog" aria-modal="true" aria-labelledby="notification-info-title"><button type="button" className="pickup-area-close notification-info-close" aria-label={t("Close")} onClick={() => setInfoOpen(false)}>×</button><h2 id="notification-info-title">{t("How notifications work")}</h2><p>{t("VanScout can confirm that this browser is allowed to receive notifications and has an active subscription. Your device still decides whether an alert is shown.")}</p><NotificationPlatformGuidance /></section></div>}</>;
 }
 
 function ProfileLanguageSettings() {
@@ -1936,7 +2006,7 @@ export function CarrierWorkspace() {
     setSelectedCarrierOffer(isOfferDetail ? routeState?.offer || null : null);
   }, [isJobDetail, isOfferDetail, isOfferForm, loc.pathname, routeState]);
   const go = (next: string, offerId?: string) => { setView(next); nav(next === "jobs" ? "/carrier" : `/carrier/${next}${offerId ? `?offer=${offerId}` : ""}`); };
-  return <div className="app"><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={job => nav(`/carrier/jobs/${job.id}`, { state: { job } })} onOpenConversation={inquiryId => go("messages", inquiryId)} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onOffer={() => nav(`/carrier/jobs/${selected.id}/offer`, { state: { job: selected } })} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onSent={offerId => go("messages", offerId)} />}{view === "offers" && !selectedCarrierOffer && <RealCarrierOffers onOpen={offer => nav(`/carrier/offers/${offer.id}`, { state: { offer } })} />}{view === "offers" && selectedCarrierOffer && <CarrierOfferDetail offer={selectedCarrierOffer} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
+  return <div className="app"><NotificationOnboarding /><Topbar kind="carrier" active={view} /><main className="workspace">{view === "jobs" && !selected && <CarrierJobs onOpen={job => nav(`/carrier/jobs/${job.id}`, { state: { job } })} onOpenConversation={inquiryId => go("messages", inquiryId)} />}{view === "jobs" && selected && !makingOffer && <RealJobDetail request={selected} onOffer={() => nav(`/carrier/jobs/${selected.id}/offer`, { state: { job: selected } })} />}{view === "jobs" && selected && makingOffer && <RealMakeOffer request={selected} onSent={offerId => go("messages", offerId)} />}{view === "offers" && !selectedCarrierOffer && <RealCarrierOffers onOpen={offer => nav(`/carrier/offers/${offer.id}`, { state: { offer } })} />}{view === "offers" && selectedCarrierOffer && <CarrierOfferDetail offer={selectedCarrierOffer} onOpenChat={offerId => go("messages", offerId)} />}{view === "messages" && <LiveMessages />}{view === "credits" && <Wallet />}{view === "profile" && <CarrierProfileEditor />}</main></div>;
 }
 
 function CarrierJobs({ onOpen, onOpenConversation }: { onOpen: (request: MarketplaceTransport) => void; onOpenConversation: (inquiryId: string) => void }) {

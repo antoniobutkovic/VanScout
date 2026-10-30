@@ -46,11 +46,15 @@ async function ensureSchema() {
         phone_verified_at TIMESTAMPTZ,
         role TEXT NOT NULL DEFAULT 'requester' CHECK (role IN ('requester', 'transporter')),
         preferred_language TEXT NOT NULL DEFAULT 'en' CHECK (preferred_language IN ('en', 'hr')),
+        notification_prompt_pending BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `.then(async () => {
       await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS preferred_language TEXT NOT NULL DEFAULT 'en' CHECK (preferred_language IN ('en', 'hr'))`;
+      // Existing accounts are not prompted retroactively. New accounts opt in
+      // to the one-time onboarding prompt when they are created below.
+      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS notification_prompt_pending BOOLEAN NOT NULL DEFAULT FALSE`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_email_verifications (
           token_hash TEXT PRIMARY KEY,
@@ -492,6 +496,23 @@ export async function updateUserLanguagePreference(userId: string, language: Lan
   return isLanguage(rows[0]?.preferred_language) ? rows[0].preferred_language : null;
 }
 
+export async function hasPendingNotificationPrompt(userId: string) {
+  await ensureSchema();
+  const rows = await database()`SELECT notification_prompt_pending FROM vanscout_users WHERE id = ${userId} LIMIT 1`;
+  return Boolean(rows[0]?.notification_prompt_pending);
+}
+
+export async function markNotificationPromptShown(userId: string) {
+  await ensureSchema();
+  const rows = await database()`
+    UPDATE vanscout_users
+    SET notification_prompt_pending = FALSE, updated_at = NOW()
+    WHERE id = ${userId} AND notification_prompt_pending = TRUE
+    RETURNING id
+  `;
+  return Boolean(rows[0]);
+}
+
 export async function findUserByGoogleIdentity(identity: GoogleIdentity): Promise<AppUser | null> {
   await ensureSchema();
   const sql = database();
@@ -536,8 +557,8 @@ export async function upsertGoogleUser(identity: GoogleIdentity, role?: AccountR
         RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
       `
     : await sql`
-        INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, role)
-        VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${identity.name}, ${firstName}, ${lastNameParts.join(" ")}, ${identity.avatarUrl}, NOW(), ${selectedRole})
+        INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, role, notification_prompt_pending)
+        VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${identity.name}, ${firstName}, ${lastNameParts.join(" ")}, ${identity.avatarUrl}, NOW(), ${selectedRole}, TRUE)
         ON CONFLICT (email) DO UPDATE SET
           google_subject = EXCLUDED.google_subject,
           name = EXCLUDED.name,
@@ -558,8 +579,8 @@ export async function createGoogleUserWithPhone(identity: GoogleIdentity, role: 
   const normalizedFirstName = firstName.trim();
   const normalizedLastName = lastName.trim();
   const rows = await sql`
-    INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role)
-    VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role})
+    INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role, notification_prompt_pending)
+    VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role}, TRUE)
     RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
   `;
   return toUser(rows[0] as Record<string, unknown>);
@@ -600,8 +621,8 @@ export async function createPasswordUser(email: string, passwordHash: string, ro
   const sql = database();
   const normalizedEmail = email.trim().toLowerCase();
   const rows = await sql`
-    INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role)
-    VALUES (${randomUUID()}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role})
+    INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role, notification_prompt_pending)
+    VALUES (${randomUUID()}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role}, TRUE)
     ON CONFLICT (email) DO NOTHING
     RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
   `;
