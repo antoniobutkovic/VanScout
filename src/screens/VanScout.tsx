@@ -10,6 +10,7 @@ import { Picker } from "../components/Picker";
 import { AddressPicker } from "../components/AddressPicker";
 import { LegalDocumentContent } from "../components/LegalDocumentContent";
 import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-phone";
+import { firebasePhoneError, isInvalidPhoneError, phoneVerificationApiError } from "../lib/firebase-phone-error";
 import { normalizePhoneNumber } from "../lib/phone-number";
 import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from "../lib/client-auth";
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
@@ -70,35 +71,6 @@ type GoogleRegistration = { token: string; profile: { email: string; firstName: 
 type AuthConfig = {
   firebase?: ({ enabled: false; testMode: boolean } | ({ enabled: true } & FirebasePhoneConfig));
 };
-
-function firebasePhoneError(error: unknown, translate: (key: string) => string, action: "send" | "verify") {
-  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
-  const messages: Record<string, string> = {
-    "auth/invalid-phone-number": "Enter a valid mobile number for the selected country",
-    "auth/missing-phone-number": "Enter a valid mobile number for the selected country",
-    "auth/invalid-verification-code": "The verification code is incorrect",
-    "auth/invalid-credential": "The verification code is invalid or expired. Request a new code and try again.",
-    "auth/code-expired": "The verification code has expired. Send a new code.",
-    "auth/too-many-requests": "Too many attempts. Please wait a few minutes before trying again.",
-    "auth/quota-exceeded": "We can't send another code to this number right now. Please try again later.",
-    "auth/network-request-failed": "Check your internet connection and try again.",
-    "auth/captcha-check-failed": "Security verification failed. Reload the page and try again.",
-    "auth/invalid-app-credential": "Phone verification could not be started. Reload the page and try again.",
-    "auth/operation-not-allowed": "Phone verification is not available. Please contact support.",
-    "auth/app-not-authorized": "Phone verification is not available on this website yet.",
-  };
-  if (messages[code]) return translate(messages[code]);
-  // Firebase setup, quota, security-check, and unknown errors are intentionally
-  // kept out of the UI. Detailed diagnostics belong in server/client logs.
-  return translate(action === "send"
-    ? "We couldn't send a verification code right now. Please try again in a moment."
-    : "We couldn't verify your phone number right now. Please try again in a moment.");
-}
-
-function isInvalidPhoneError(error: unknown) {
-  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
-  return code === "auth/invalid-phone-number" || code === "auth/missing-phone-number";
-}
 
 function isValidEmail(value: string) {
   return EMAIL_PATTERN.test(value.trim());
@@ -825,11 +797,15 @@ export function Registration() {
   const sendPhoneCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true); setPhoneError(""); setAuthError(""); setMessage("");
+    let codeWasSent = false;
     try {
       const authorizationToken = googleRegistrationToken || getAuthToken();
       const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
       const configPayload = await configResponse.json() as AuthConfig;
-      if (!configResponse.ok || !configPayload.firebase?.enabled) throw new Error("Phone verification unavailable");
+      if (!configResponse.ok || !configPayload.firebase?.enabled) {
+        setAuthError(phoneVerificationApiError("Phone verification unavailable", t, "send"));
+        return;
+      }
       const phoneNumber = normalizePhoneNumber(country, localNumber, configPayload.firebase.testMode);
       if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
 
@@ -837,10 +813,11 @@ export function Registration() {
       const validationPayload = await validationResponse.json().catch(() => ({})) as { error?: string };
       if (!validationResponse.ok) {
         if (validationResponse.status === 400) {
-          setPhoneError(t(validationPayload.error || "Enter a valid mobile number for the selected country"));
+          setPhoneError(phoneVerificationApiError(validationPayload.error, t, "send"));
           return;
         }
-        throw new Error(validationPayload.error || "Phone verification unavailable");
+        setAuthError(phoneVerificationApiError(validationPayload.error, t, "send"));
+        return;
       }
 
       const auth = getFirebasePhoneAuth(configPayload.firebase);
@@ -851,6 +828,7 @@ export function Registration() {
       const verifier = new RecaptchaVerifier(auth, "firebase-phone-recaptcha", { size: "invisible" });
       recaptchaVerifier.current = verifier;
       confirmationResult.current = await signInWithPhoneNumber(auth, phoneNumber, verifier);
+      codeWasSent = true;
       setPendingPhoneNumber(phoneNumber);
       setAuthStage("phone-code");
       setMessage(configPayload.firebase.testMode ? "" : t("We sent a six-digit code to your phone."));
@@ -860,8 +838,13 @@ export function Registration() {
       else setAuthError(message);
       confirmationResult.current = null;
     } finally {
-      recaptchaVerifier.current?.clear();
-      recaptchaVerifier.current = null;
+      // Keep the successful verifier until the code is confirmed. This matches
+      // Firebase's lifecycle and avoids discarding a just-completed invisible
+      // reCAPTCHA challenge before its confirmation flow has finished.
+      if (!codeWasSent) {
+        recaptchaVerifier.current?.clear();
+        recaptchaVerifier.current = null;
+      }
       setSubmitting(false);
     }
   };
@@ -876,12 +859,15 @@ export function Registration() {
       const firebaseIdToken = await credential.user.getIdToken();
       const authorizationToken = googleRegistrationToken || getAuthToken();
       const response = await fetch("/api/auth/phone/verify", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ firebaseIdToken, ...(googleRegistrationToken ? { role, firstName, lastName } : {}) }) });
-      const payload = await response.json() as { token?: string; user?: AuthenticatedUser };
+      const payload = await response.json() as { token?: string; user?: AuthenticatedUser; error?: string };
       if (response.status === 409) {
         setAuthError(t("This phone number is already linked to an account."));
         return;
       }
-      if (!response.ok || !payload.user) throw new Error("Phone verification unavailable");
+      if (!response.ok || !payload.user) {
+        setAuthError(phoneVerificationApiError(payload.error, t, "verify"));
+        return;
+      }
       const sessionToken = getAuthToken();
       window.localStorage.removeItem("auth_token");
       if (firebaseAuth.current) await signOut(firebaseAuth.current);
