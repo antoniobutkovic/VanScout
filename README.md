@@ -69,6 +69,14 @@ VanScout API validates that token against Firebase's public keys before marking
 the database phone number as verified. No Firebase service-account private key
 is required by this implementation.
 
+If Firebase returns `auth/captcha-check-failed`, first check **Firebase
+Authentication → Settings → Authorized domains**. Production must include
+`www.van-scout.com` (and any hostname that can serve the app); staging and local
+development need their own exact hostnames as well. Also confirm the **Phone**
+provider is enabled. The staging environment intentionally uses Firebase test
+mode, so it can verify only the fictional numbers configured in Firebase and
+will not send real SMS messages.
+
 Email delivery uses Zoho SMTP. `SMTP_USER` must be the exact mailbox that is
 allowed to send, and `SMTP_HOST` must match the server shown in that mailbox's
 Zoho Mail server configuration. The app sends using `SMTP_USER` directly, so a
