@@ -6,6 +6,9 @@ import { isLanguage, type Language } from "./language";
 
 export type AccountRole = "requester" | "transporter";
 
+const TRANSPORTER_WELCOME_CREDIT_CENTS = 1_500;
+const TRANSPORTER_WELCOME_CREDIT_DESCRIPTION = "Welcome bonus credits";
+
 export type AppUser = {
   id: string;
   email: string;
@@ -578,10 +581,25 @@ export async function createGoogleUserWithPhone(identity: GoogleIdentity, role: 
   const sql = database();
   const normalizedFirstName = firstName.trim();
   const normalizedLastName = lastName.trim();
+  const userId = randomUUID();
   const rows = await sql`
-    INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role, notification_prompt_pending)
-    VALUES (${randomUUID()}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role}, TRUE)
-    RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    WITH new_user AS (
+      INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role, notification_prompt_pending)
+      VALUES (${userId}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role}, TRUE)
+      RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    ), welcome_account AS (
+      INSERT INTO vanscout_carrier_credit_accounts (carrier_id, balance_cents)
+      SELECT id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}
+      FROM new_user
+      WHERE role = 'transporter'
+      RETURNING carrier_id
+    ), welcome_credit AS (
+      INSERT INTO vanscout_credit_transactions (id, carrier_id, amount_cents, kind, description)
+      SELECT ${randomUUID()}, carrier_id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}, 'adjustment', ${TRANSPORTER_WELCOME_CREDIT_DESCRIPTION}
+      FROM welcome_account
+    )
+    SELECT id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    FROM new_user
   `;
   return toUser(rows[0] as Record<string, unknown>);
 }
@@ -620,11 +638,26 @@ export async function createPasswordUser(email: string, passwordHash: string, ro
   await ensureSchema();
   const sql = database();
   const normalizedEmail = email.trim().toLowerCase();
+  const userId = randomUUID();
   const rows = await sql`
-    INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role, notification_prompt_pending)
-    VALUES (${randomUUID()}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role}, TRUE)
-    ON CONFLICT (email) DO NOTHING
-    RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    WITH new_user AS (
+      INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role, notification_prompt_pending)
+      VALUES (${userId}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role}, TRUE)
+      ON CONFLICT (email) DO NOTHING
+      RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    ), welcome_account AS (
+      INSERT INTO vanscout_carrier_credit_accounts (carrier_id, balance_cents)
+      SELECT id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}
+      FROM new_user
+      WHERE role = 'transporter'
+      RETURNING carrier_id
+    ), welcome_credit AS (
+      INSERT INTO vanscout_credit_transactions (id, carrier_id, amount_cents, kind, description)
+      SELECT ${randomUUID()}, carrier_id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}, 'adjustment', ${TRANSPORTER_WELCOME_CREDIT_DESCRIPTION}
+      FROM welcome_account
+    )
+    SELECT id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    FROM new_user
   `;
   return rows[0] ? toUser(rows[0] as Record<string, unknown>) : null;
 }
