@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { resetUserPassword } from "@/lib/database";
@@ -19,7 +20,8 @@ export async function POST(request: Request) {
   try {
     const body = bodySchema.parse(await request.json());
     const passwordHash = await hashPassword(body.password);
-    const reset = await resetUserPassword(body.token, passwordHash);
+    const tokenHash = createHash("sha256").update(body.token).digest("hex");
+    const reset = await resetUserPassword(tokenHash, passwordHash);
     if (!reset) return NextResponse.json({ error: "This reset link is invalid or expired" }, { status: 400 });
     return NextResponse.json({ message: "Password reset successfully" });
   } catch (error) {
