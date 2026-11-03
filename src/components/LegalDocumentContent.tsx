@@ -6,7 +6,7 @@ const operator = {
   address: "Legal address",
   registration: "Legal Registration",
   vatId: "11111111111",
-  privacyEmail: "example@van-scout.com",
+  privacyEmail: "info@van-scout.com",
 };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
