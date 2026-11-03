@@ -28,7 +28,7 @@ export async function sendPasswordResetEmail({ to, resetUrl }: { to: string; res
     // Zoho only permits the authenticated mailbox (or one of its aliases).
     // Use it for the envelope and From header so MAIL_FROM cannot cause a
     // misleading "Sender is not allowed to relay" error.
-    from: smtpUser,
+    from: { name: "VanScout", address: smtpUser },
     envelope: { from: smtpUser, to },
     to,
     subject: "Reset your VanScout password",
@@ -40,7 +40,7 @@ export async function sendPasswordResetEmail({ to, resetUrl }: { to: string; res
 export async function sendEmailVerificationEmail({ to, verificationCode }: { to: string; verificationCode: string }) {
   const { smtpUser, transporter } = getMailConfig();
   await transporter.sendMail({
-    from: smtpUser,
+    from: { name: "VanScout", address: smtpUser },
     envelope: { from: smtpUser, to },
     to,
     subject: `${verificationCode} is your VanScout verification code`,
@@ -52,7 +52,7 @@ export async function sendEmailVerificationEmail({ to, verificationCode }: { to:
 export async function sendTransportReviewEmail({ to, transporterName, transportName, reviewUrl }: { to: string; transporterName: string; transportName: string; reviewUrl: string }) {
   const { smtpUser, transporter } = getMailConfig();
   await transporter.sendMail({
-    from: smtpUser,
+    from: { name: "VanScout", address: smtpUser },
     envelope: { from: smtpUser, to },
     to,
     subject: `How was your ${transportName} transport?`,
