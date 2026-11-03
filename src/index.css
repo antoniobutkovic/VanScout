@@ -696,6 +696,8 @@ blockquote footer { color: var(--muted); font-size: 11px; margin-top: 10px; font
 .make-offer > form { display: grid; gap: 18px; }
 .make-offer > form > label { margin: 0; }
 .make-offer > form input[type="date"], .carrier-ride-form input[type="time"] { min-height: 52px; padding: 0 14px; background: var(--white); }
+.make-offer > form > label { min-width: 0; }
+.make-offer > form input[type="date"] { width: 100%; min-width: 0; max-width: 100%; height: 52px; min-height: 52px; max-height: 52px; }
 .vat-selection { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .vat-selection button { width: 100%; min-height: 52px; border: 1px solid var(--stone); background: var(--white); color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
 .vat-selection button:hover, .vat-selection button.selected { border-color: var(--moss); background: var(--moss-soft); }
@@ -992,7 +994,9 @@ body:has(.profile-settings-page) .app-topbar { border-bottom: 0 !important; }
   .carrier-ride-card { align-items: flex-start; flex-direction: column; padding: 20px; }
   .carrier-ride-card .button { width: 100%; }
   .carrier-ride-form .inline-inputs { grid-template-columns: 1fr; }
-  .ride-create-dialog .inline-inputs { grid-template-columns: 1fr; }
+  .ride-create-dialog .inline-inputs { grid-template-columns: minmax(0, 1fr); }
+  .ride-create-dialog .inline-inputs > label { min-width: 0; }
+  .ride-create-dialog .inline-inputs input[type="date"], .ride-create-dialog .inline-inputs input[type="time"] { width: 100%; min-width: 0; max-width: 100%; height: 52px; min-height: 52px; max-height: 52px; }
   .jobs-title { display: flex; }
   .jobs-title { margin-bottom: 20px; }
   .jobs-actions { width: 100%; justify-items: start; margin-left: 0; }
@@ -1274,7 +1278,7 @@ body:has(.profile-settings-page) .app-topbar { border-bottom: 0 !important; }
   .live-messages .mobile-contact-status { grid-column: 2; grid-row: 1; color: var(--ink); font-size: 12px; line-height: 1.35; }
   .live-messages .deal-context.confirmed .deal-contact { grid-column: 2; grid-row: 2; align-self: start; justify-content: flex-start; min-width: 0; }
   .live-messages .thread { min-height: 0; overscroll-behavior-y: contain; }
-  .live-messages form { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .live-messages form { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
 }
 
 @media (min-width: 681px) {
@@ -1291,7 +1295,7 @@ body:has(.profile-settings-page) .app-topbar { border-bottom: 0 !important; }
   .my-offers .carrier-offer-details { min-width: 0; }
   .my-offers .carrier-offer-details h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-bottom: 12px; font-size: 16px; line-height: 1.35; letter-spacing: -.025em; overflow-wrap: anywhere; }
   .my-offers .carrier-offer-details .transport-route { gap: 6px; margin-bottom: 12px; font-size: 12px; line-height: 1.4; }
-  .my-offers .transport-route > div { grid-template-columns: 22px minmax(0, 1fr); gap: 8px; }
+  .my-offers .transport-route > div { grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
   .my-offers .transport-route b { font-weight: 550; }
   .my-offers .carrier-offer-details > small { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
   .my-offers .carrier-offer-summary { display: grid; min-height: 80px; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--stone); }
@@ -1308,7 +1312,7 @@ body:has(.profile-settings-page) .app-topbar { border-bottom: 0 !important; }
   :is(.request-row, .job.list-item-link) > div:not(.item-image):not(.request-meta) { min-width: 0; }
   :is(.request-row, .job.list-item-link) h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-bottom: 12px; font-size: 16px; line-height: 1.35; letter-spacing: -.025em; overflow-wrap: anywhere; }
   :is(.request-row, .job.list-item-link) .transport-route { font-size: 12px; line-height: 1.4; }
-  :is(.request-row, .job.list-item-link) .transport-route > div { grid-template-columns: 22px minmax(0, 1fr); }
+  :is(.request-row, .job.list-item-link) .transport-route > div { grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; }
   :is(.request-row, .job.list-item-link) .transport-route b { font-weight: 550; }
   :is(.request-row, .job.list-item-link) .status { align-self: end; padding: 6px 9px; font-size: 10px; line-height: 1.4; }
   .live-messages > aside { border: 0; background: transparent; }

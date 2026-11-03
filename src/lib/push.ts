@@ -30,7 +30,15 @@ let configuredWith = "";
 
 const CROATIAN_PUSH_COPY: Record<string, string> = {
   "New matching transport": "Novi odgovarajući prijevoz",
+  "New transport request": "Novi zahtjev za prijevoz",
+  "New message": "Nova poruka",
+  "New transport offer": "Nova ponuda za prijevoz",
+  "Transport update": "Ažuriranje prijevoza",
+  "Transport confirmed": "Prijevoz je potvrđen",
   "Your transporter has confirmed the transport.": "Vaš prijevoznik je potvrdio prijevoz.",
+  "Your transport request is confirmed.": "Vaš zahtjev za prijevoz je potvrđen.",
+  "The transporter accepted your transport request.": "Prijevoznik je prihvatio vaš zahtjev za prijevoz.",
+  "The requester is ready to confirm the transport.": "Naručitelj je spreman potvrditi prijevoz.",
   "You received a new ride request.": "Primili ste novi upit za vožnju.",
   "You have a new message.": "Imate novu poruku.",
   "You were selected as the transporter.": "Odabrani ste kao prijevoznik.",

@@ -71,7 +71,7 @@ export async function POST(request: Request) {
               publishRealtimeEvent(`user:${target.carrierId}`, "deal-updated", { offerId: target.offerId }),
             ]),
             sendPushNotification(deal.requesterId, {
-              title: "VanScout",
+              title: "Transport confirmed",
               body: "Your transporter has confirmed the transport.",
               url: "/customer/messages",
               tag: `transport-deal-${deal.transportId}`,

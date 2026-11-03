@@ -21,7 +21,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         publishRealtimeEvent(`user:${target.carrierId}`, "deal-updated", { offerId: target.offerId }),
       ]),
       sendPushNotification(user.role === "requester" ? deal.carrierId : deal.requesterId, {
-        title: "VanScout",
+        title: "Transport update",
         body: user.role === "requester"
           ? "You were selected as the transporter."
           : "Your transporter has confirmed the transport.",

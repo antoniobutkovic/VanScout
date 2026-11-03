@@ -12,10 +12,6 @@ self.addEventListener("push", event => {
   event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(windows => {
     const appWindows = windows.filter(windowClient => new URL(windowClient.url).origin === self.location.origin);
     appWindows.forEach(windowClient => windowClient.postMessage({ type: "vanscout-push", notification: data }));
-    const appIsVisible = appWindows.some(windowClient => windowClient.visibilityState === "visible");
-    // A message is time-sensitive, so show it on desktop even while the app is
-    // open. Other push types stay quiet while the user is already in VanScout.
-    if (appIsVisible && !tag.startsWith("message-")) return;
     return self.registration.showNotification(title, {
       body,
       icon: "/favicon.ico",

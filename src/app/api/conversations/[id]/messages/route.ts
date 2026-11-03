@@ -34,7 +34,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       publishRealtimeEvent(`chat:${id}`, "message-created", { messageId: message.id }),
       publishRealtimeEvent(`user:${message.recipientId}`, "message-created", { offerId: id, messageId: message.id }),
       sendPushNotification(message.recipientId, {
-        title: "VanScout",
+        title: "New message",
         body: "You have a new message.",
         url: user.role === "transporter" ? "/customer/messages" : "/carrier/messages",
         tag: `message-${id}`,
