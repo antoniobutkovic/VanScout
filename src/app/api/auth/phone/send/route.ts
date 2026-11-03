@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { isPhoneNumberInUse } from "@/lib/database";
 import { authenticatedUser } from "@/lib/request-auth";
 import { bearerToken, verifyGoogleRegistrationToken } from "@/lib/session";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -23,6 +24,9 @@ export async function POST(request: Request) {
 
   try {
     const { phoneNumber } = bodySchema.parse(await request.json());
+    if (await isPhoneNumberInUse(phoneNumber, user?.id)) {
+      return NextResponse.json({ error: "This phone number is already used by another account" }, { status: 409 });
+    }
     return NextResponse.json({ message: "Phone number accepted" });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Enter a valid international phone number" }, { status: 400 });

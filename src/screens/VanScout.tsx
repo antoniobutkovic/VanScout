@@ -546,7 +546,7 @@ export function CreateRequest() {
     const user = await fetchSessionUser().catch(() => null);
     if (!user) {
       saveDraftForAuthentication();
-      return nav(`/auth?next=${encodeURIComponent("/create-request?step=5&publish=1")}`);
+      return nav(`/auth?role=requester&next=${encodeURIComponent("/create-request?step=5&publish=1")}`);
     }
     if (user.role !== "requester") return nav("/carrier");
     const token = getAuthToken();
@@ -575,7 +575,7 @@ export function CreateRequest() {
       if (response.status === 401) {
         clearAuthSession();
         saveDraftForAuthentication();
-        return nav(`/auth?next=${encodeURIComponent("/create-request?step=5&publish=1")}`);
+        return nav(`/auth?role=requester&next=${encodeURIComponent("/create-request?step=5&publish=1")}`);
       }
       if (!response.ok) throw new Error(payload.error || t("Unable to publish transport"));
       await syncPendingRequestImages(token, payload.transport?.id).catch(() => false);
@@ -684,11 +684,15 @@ export function Registration() {
   const requestedMode = searchParams.get("mode");
   const verificationEmail = searchParams.get("verifyEmail") || "";
   const requestedNext = searchParams.get("next") || "";
-  const safeNext = requestedNext.startsWith("/customer") || isRequestPublishReturnPath(requestedNext) ? requestedNext : "";
+  const isRequestPublishAuthFlow = isRequestPublishReturnPath(requestedNext);
+  const safeNext = requestedNext.startsWith("/customer") || isRequestPublishAuthFlow ? requestedNext : "";
   const requestedStage = searchParams.get("stage");
   const stageFromUrl = authStages.includes(requestedStage as AuthStage) ? requestedStage as AuthStage : null;
-  const [stage, setStage] = useState<AuthStage>(stageFromUrl ?? (verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login"));
-  const [role, setRole] = useState<AuthRole>(() => searchParams.get("role") === "transporter" ? "transporter" : "requester");
+  const initialStage = isRequestPublishAuthFlow && stageFromUrl === "role"
+    ? "profile"
+    : stageFromUrl ?? (verificationEmail ? "email-code" : requestedMode === "register" ? isRequestPublishAuthFlow ? "profile" : "role" : "login");
+  const [stage, setStage] = useState<AuthStage>(initialStage);
+  const [role, setRole] = useState<AuthRole>(() => isRequestPublishAuthFlow || searchParams.get("role") !== "transporter" ? "requester" : "transporter");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState(verificationEmail);
@@ -712,9 +716,10 @@ export function Registration() {
   const firebaseAuth = useRef<Auth | null>(null);
 
   const setAuthStage = (next: AuthStage, replace = false) => {
-    setStage(next);
+    const resolvedStage = isRequestPublishAuthFlow && next === "role" ? "profile" : next;
+    setStage(resolvedStage);
     const params = new URLSearchParams(searchParams);
-    params.set("stage", next);
+    params.set("stage", resolvedStage);
     nav(`/auth?${params.toString()}`, { replace });
   };
 
@@ -724,8 +729,14 @@ export function Registration() {
   }, []);
 
   useEffect(() => {
-    setStage(stageFromUrl ?? (verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login"));
-  }, [requestedMode, stageFromUrl, verificationEmail]);
+    setStage(isRequestPublishAuthFlow && stageFromUrl === "role"
+      ? "profile"
+      : stageFromUrl ?? (verificationEmail ? "email-code" : requestedMode === "register" ? isRequestPublishAuthFlow ? "profile" : "role" : "login"));
+  }, [isRequestPublishAuthFlow, requestedMode, stageFromUrl, verificationEmail]);
+
+  useEffect(() => {
+    if (isRequestPublishAuthFlow) setRole("requester");
+  }, [isRequestPublishAuthFlow]);
 
   useEffect(() => {
     if (verificationEmail) setEmail(verificationEmail);
@@ -821,6 +832,11 @@ export function Registration() {
     setAuthStage("role");
   };
 
+  const registrationParams = new URLSearchParams(searchParams);
+  registrationParams.set("mode", "register");
+  registrationParams.delete("stage");
+  const registrationHref = `/auth?${registrationParams.toString()}`;
+
   const verifyEmailCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (emailCode.length !== 6) return setAuthError(t("Enter the complete six-digit code"));
@@ -866,7 +882,7 @@ export function Registration() {
       const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ phoneNumber }) });
       const validationPayload = await validationResponse.json().catch(() => ({})) as { error?: string };
       if (!validationResponse.ok) {
-        if (validationResponse.status === 400) {
+        if (validationResponse.status === 400 || validationResponse.status === 409) {
           setPhoneError(phoneVerificationApiError(validationPayload.error, t, "send"));
           return;
         }
@@ -932,7 +948,7 @@ export function Registration() {
   };
 
   return <div className="auth"><header><Mark /><div className="standalone-header-actions"><LanguagePicker /></div></header><main>
-    {stage === "login" && <><h1>{t("Login or create new account")}</h1><GoogleSignInButton onAuthenticated={authenticated} onRegistrationRequired={beginGoogleRegistration} /><div className="or">{t("or")}</div><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to="/auth?mode=register">{t("Create one here")}</Link></p></>}
+    {stage === "login" && <><h1>{t("Login or create new account")}</h1><GoogleSignInButton onAuthenticated={authenticated} onRegistrationRequired={beginGoogleRegistration} /><div className="or">{t("or")}</div><form className="auth-form" noValidate onSubmit={handleSubmit}><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Password")} autoComplete="current-password" /></label><Link className="forgot-password" to="/auth/forgot-password">{t("Forgot your password?")}</Link></div>{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Sign in")} <Arrow /></button></form><p className="auth-signup-prompt">{t("Don't have an account?")} <Link to={registrationHref}>{t("Create one here")}</Link></p></>}
     {stage === "role" && <><h1>{t("How will you use VanScout?")}</h1><RolePicker value={role} onChange={setRole} /><button type="button" className="button dark full" onClick={() => setAuthStage("profile")}>{t("Continue")} <Arrow /></button></>}
     {stage === "profile" && <><h1>{t("Create your account")}</h1><form className="auth-form" noValidate onSubmit={handleSubmit}><div className="name-fields"><label>{t("First name")}<input value={firstName} onChange={event => setFirstName(event.target.value)} placeholder={t("e.g. Ana")} autoComplete="given-name" /></label><label>{t("Last name")}<input value={lastName} onChange={event => setLastName(event.target.value)} placeholder={t("e.g. Novak")} autoComplete="family-name" /></label></div>{!googleRegistrationToken && <><label>{t("Email")}<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><div className="password-field"><label>{t("Password")}<PasswordControl value={password} onChange={event => { const value = event.target.value; setPassword(value); setPasswordError(value.length > 0 && value.length < 12 ? t("Password must be at least 12 characters") : ""); setPasswordConfirmationError(passwordConfirmation && value !== passwordConfirmation ? t("Passwords do not match") : ""); }} placeholder={t("Create a password")} autoComplete="new-password" aria-invalid={Boolean(passwordError)} />{passwordError && <span className="field-error" role="alert">{passwordError}</span>}</label><label className="password-confirmation"><span>{t("Confirm password")}</span><PasswordControl value={passwordConfirmation} onChange={event => { const value = event.target.value; setPasswordConfirmation(value); setPasswordConfirmationError(value && value !== password ? t("Passwords do not match") : ""); }} placeholder={t("Repeat your password")} autoComplete="new-password" aria-invalid={Boolean(passwordConfirmationError)} />{passwordConfirmationError && <span className="field-error" role="alert">{passwordConfirmationError}</span>}</label></div></>}{authError && <p className="auth-error" role="alert">{authError}</p>}<button type="submit" className="button dark full auth-create-button" disabled={submitting}>{t("Confirm and continue")} <Arrow /></button></form></>}
     {stage === "email-code" && <><h1>{t("Enter your email code")}</h1><p>{t("We sent a six-digit verification code to")} <strong>{email}</strong>.</p><form noValidate onSubmit={verifyEmailCode}><OtpInput value={emailCode} onChange={setEmailCode} disabled={submitting} />{authError && <p className="auth-message error" role="alert">{authError}</p>}<button className="button dark full" type="submit" disabled={submitting || emailCode.length !== 6}>{t("Verify email")} <Arrow /></button></form><button className="quiet-link center" type="button" onClick={() => void resendEmailCode()} disabled={submitting || emailResendCooldown.remaining > 0}>{emailResendCooldown.remaining > 0 ? t("Send a new code in {seconds}s", { seconds: emailResendCooldown.remaining }) : t("Send a new code")}</button></>}
