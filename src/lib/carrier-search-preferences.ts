@@ -82,7 +82,6 @@ export async function findCarrierIdsWithMatchingSearchPreferences(transport: Tra
     JOIN vanscout_users user_account ON user_account.id = preferences.carrier_id
     WHERE user_account.role = 'transporter'
       AND preferences.notify_on_match = TRUE
-      AND (preferences.distance_km IS NOT NULL OR preferences.pickup_latitude IS NOT NULL)
   `;
   return rows.flatMap(row => {
     const maximumDistance = row.distance_km === null ? null : Number(row.distance_km);

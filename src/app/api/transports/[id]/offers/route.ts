@@ -41,7 +41,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       publishRealtimeEvent(`user:${offer.requesterId}`, "conversation-created", { offerId: offer.id }),
       publishRealtimeEvent(`user:${user.id}`, "conversation-created", { offerId: offer.id }),
       sendPushNotification(offer.requesterId, {
-        title: "VanScout",
+        title: "New transport offer",
         body: "You received a new transport offer.",
         url: "/customer/messages",
         tag: `offer-${offer.id}`,
