@@ -429,7 +429,6 @@ textarea { min-height: 105px; resize: vertical; }
 .carrier-ride-card > div > b { font-size: 15px; }
 .carrier-ride-card > div > span, .carrier-ride-card small { color: var(--muted); font-size: 12px; font-weight: 650; }
 .carrier-ride-card .transport-route { font-size: 15px; }
-.carrier-ride-inquiries-back { margin: 0 0 26px; }
 .carrier-ride-inquiries > header { margin-bottom: 34px; }
 .carrier-ride-inquiries > header h1 { margin-bottom: 12px; font-size: clamp(1.6rem, 2.5vw, 2.5rem); }
 .carrier-ride-inquiries > header p { margin: 0; color: var(--muted); font-size: 13px; }
