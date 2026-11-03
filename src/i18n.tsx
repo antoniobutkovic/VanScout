@@ -276,6 +276,7 @@ const CROATIAN: Record<string, string> = {
   "Back to sign in": "Natrag na prijavu",
   "Reset your password": "Resetirajte lozinku",
   "New password": "Nova lozinka",
+  "Enter a new password": "Unesite novu lozinku",
   "Confirm password": "Potvrdite lozinku",
   "Reset password": "Resetiraj lozinku",
   "Password reset successfully": "Lozinka je uspješno resetirana.",
