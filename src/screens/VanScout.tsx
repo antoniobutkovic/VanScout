@@ -14,6 +14,7 @@ import { firebasePhoneError, isInvalidPhoneError, phoneVerificationApiError } fr
 import { normalizePhoneNumber } from "../lib/phone-number";
 import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from "../lib/client-auth";
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
+import { clearPendingRequestDraft, isRequestPublishReturnPath, loadPendingRequestDraft, savePendingRequestDraft } from "../lib/request-draft";
 import { offerPriceFromEnteredAmount, offerPriceFromTotal } from "../lib/offer-pricing";
 import { googleMapsDirectionsUrl } from "../lib/google-maps-directions";
 import { CONTACT_DETAILS_RESTRICTED_MESSAGE, hasRestrictedContactDetails } from "../lib/contact-details";
@@ -479,7 +480,9 @@ export function CreateRequest() {
   const nav = useNavigate();
   const loc = useLocation();
   const returnTo = (loc.state as { returnTo?: string } | null)?.returnTo === "/customer" ? "/customer" : "/";
-  const requestedStep = Number(new URLSearchParams(loc.search).get("step"));
+  const requestParams = new URLSearchParams(loc.search);
+  const requestedStep = Number(requestParams.get("step"));
+  const publishAfterSignIn = requestParams.get("publish") === "1" && requestedStep === WIZARD_STEPS.length - 1;
   const step = Number.isInteger(requestedStep) && requestedStep >= 0 && requestedStep < WIZARD_STEPS.length ? requestedStep : 0;
   const [category, setCategory] = useState("Furniture");
   const [itemName, setItemName] = useState("");
@@ -497,29 +500,56 @@ export function CreateRequest() {
   const [stepError, setStepError] = useState("");
   const [publishError, setPublishError] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(!publishAfterSignIn);
   const photoInput = useRef<HTMLInputElement | null>(null);
+  const autoPublishStarted = useRef(false);
   const dimensionsComplete = Object.values(dimensions).every(value => Number(value) > 0);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
 
-  const next = async () => {
-    setStepError("");
-    if (step === 0) {
-      if (!itemName.trim()) return setStepError(t("Enter the item name"));
-      if (!dimensionsComplete) return setStepError(t("Enter a valid length, width and weight"));
+  useEffect(() => {
+    if (!publishAfterSignIn) return;
+    const draft = loadPendingRequestDraft();
+    if (draft) {
+      setCategory(draft.category);
+      setItemName(draft.itemName);
+      setDescription(draft.description);
+      setTiming(draft.timing);
+      setPreferredDateFrom(draft.preferredDateFrom);
+      setPreferredDateTo(draft.preferredDateTo);
+      setDateRange(draft.dateRange);
+      setPickupLocation(draft.pickupLocation);
+      setDeliveryLocation(draft.deliveryLocation);
+      setDimensions(draft.dimensions);
     }
-    if (step === 2 && !pickupLocation) return setStepError(t("Choose a pickup location to continue"));
-    if (step === 3 && !deliveryLocation) return setStepError(t("Choose a delivery location to continue"));
-    if (step === 4 && timing === "Choose a date") {
-      if (!preferredDateFrom) return setStepError(t("Choose a transport date to continue"));
-      if (dateRange && !preferredDateTo) return setStepError(t("Choose an end date to continue"));
-      if (dateRange && preferredDateTo < preferredDateFrom) return setStepError(t("End date must be on or after start date"));
+    setDraftHydrated(true);
+  }, [publishAfterSignIn]);
+
+  const saveDraftForAuthentication = () => {
+    savePendingRequestDraft({
+      category,
+      itemName,
+      description,
+      timing,
+      preferredDateFrom,
+      preferredDateTo,
+      dateRange,
+      pickupLocation,
+      deliveryLocation,
+      dimensions,
+    });
+  };
+
+  const publish = async () => {
+    const user = await fetchSessionUser().catch(() => null);
+    if (!user) {
+      saveDraftForAuthentication();
+      return nav(`/auth?next=${encodeURIComponent("/create-request?step=5&publish=1")}`);
     }
-    if (step !== WIZARD_STEPS.length - 1) return nav(`/create-request?step=${step + 1}`, { state: loc.state });
+    if (user.role !== "requester") return nav("/carrier");
     const token = getAuthToken();
-    if (!token) return nav("/auth");
     if (!pickupLocation || !deliveryLocation) return;
     setPublishing(true);
     setPublishError("");
@@ -544,11 +574,13 @@ export function CreateRequest() {
       const payload = await response.json() as { transport?: TransportRequest; error?: string };
       if (response.status === 401) {
         clearAuthSession();
-        return nav("/auth");
+        saveDraftForAuthentication();
+        return nav(`/auth?next=${encodeURIComponent("/create-request?step=5&publish=1")}`);
       }
       if (!response.ok) throw new Error(payload.error || t("Unable to publish transport"));
       await syncPendingRequestImages(token, payload.transport?.id).catch(() => false);
       await clearPendingRequestImages().catch(() => undefined);
+      clearPendingRequestDraft();
       setPhotos([]);
       nav("/customer");
     } catch (error) {
@@ -557,6 +589,29 @@ export function CreateRequest() {
       setPublishing(false);
     }
   };
+
+  const next = async () => {
+    setStepError("");
+    if (step === 0) {
+      if (!itemName.trim()) return setStepError(t("Enter the item name"));
+      if (!dimensionsComplete) return setStepError(t("Enter a valid length, width and weight"));
+    }
+    if (step === 2 && !pickupLocation) return setStepError(t("Choose a pickup location to continue"));
+    if (step === 3 && !deliveryLocation) return setStepError(t("Choose a delivery location to continue"));
+    if (step === 4 && timing === "Choose a date") {
+      if (!preferredDateFrom) return setStepError(t("Choose a transport date to continue"));
+      if (dateRange && !preferredDateTo) return setStepError(t("Choose an end date to continue"));
+      if (dateRange && preferredDateTo < preferredDateFrom) return setStepError(t("End date must be on or after start date"));
+    }
+    if (step !== WIZARD_STEPS.length - 1) return nav(`/create-request?step=${step + 1}`, { state: loc.state });
+    await publish();
+  };
+
+  useEffect(() => {
+    if (!publishAfterSignIn || !draftHydrated || autoPublishStarted.current) return;
+    autoPublishStarted.current = true;
+    void publish();
+  }, [draftHydrated, publishAfterSignIn]);
 
   useEffect(() => {
     void loadPendingRequestImages().then(setPhotos).catch(() => setPhotoError(t("Unable to load saved photos")));
@@ -629,7 +684,7 @@ export function Registration() {
   const requestedMode = searchParams.get("mode");
   const verificationEmail = searchParams.get("verifyEmail") || "";
   const requestedNext = searchParams.get("next") || "";
-  const safeNext = requestedNext.startsWith("/customer") ? requestedNext : "";
+  const safeNext = requestedNext.startsWith("/customer") || isRequestPublishReturnPath(requestedNext) ? requestedNext : "";
   const requestedStage = searchParams.get("stage");
   const stageFromUrl = authStages.includes(requestedStage as AuthStage) ? requestedStage as AuthStage : null;
   const [stage, setStage] = useState<AuthStage>(stageFromUrl ?? (verificationEmail ? "email-code" : requestedMode === "register" ? "role" : "login"));
@@ -678,8 +733,7 @@ export function Registration() {
     setAuthError("");
   }, [requestedMode, verificationEmail]);
 
-  const syncPhotosAndNavigate = async (token: string, user: AuthenticatedUser) => {
-    await syncPendingRequestImages(token).catch(() => false);
+  const navigateAfterAuthentication = async (user: AuthenticatedUser) => {
     nav(user.role === "transporter" ? "/carrier" : safeNext || "/customer");
   };
 
@@ -739,7 +793,7 @@ export function Registration() {
         setAuthStage("phone");
         return;
       }
-      await syncPhotosAndNavigate(getAuthToken(), payload.user);
+      await navigateAfterAuthentication(payload.user);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : t(stage === "profile" ? "Unable to create account" : "Unable to sign in"));
     } finally {
@@ -751,7 +805,7 @@ export function Registration() {
     window.localStorage.removeItem("auth_token");
     setGoogleRegistrationToken("");
     setRole(user.role);
-    if (user.phoneVerified) void syncPhotosAndNavigate(getAuthToken(), user);
+    if (user.phoneVerified) void navigateAfterAuthentication(user);
     else setAuthStage("phone");
   };
 
@@ -868,12 +922,11 @@ export function Registration() {
         setAuthError(phoneVerificationApiError(payload.error, t, "verify"));
         return;
       }
-      const sessionToken = getAuthToken();
       window.localStorage.removeItem("auth_token");
       if (firebaseAuth.current) await signOut(firebaseAuth.current);
       confirmationResult.current = null;
       setGoogleRegistrationToken("");
-      await syncPhotosAndNavigate(sessionToken, payload.user);
+      await navigateAfterAuthentication(payload.user);
     } catch (error) { setAuthError(firebasePhoneError(error, t, "verify")); }
     finally { setSubmitting(false); }
   };
