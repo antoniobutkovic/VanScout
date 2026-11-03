@@ -673,6 +673,23 @@ export async function findUserByEmailWithPassword(email: string) {
   };
 }
 
+export async function isPhoneNumberInUse(phoneNumber: string, excludingUserId?: string) {
+  await ensureSchema();
+  const sql = database();
+  const rows = excludingUserId ? await sql`
+    SELECT id
+    FROM vanscout_users
+    WHERE phone_number = ${phoneNumber} AND id <> ${excludingUserId}
+    LIMIT 1
+  ` : await sql`
+    SELECT id
+    FROM vanscout_users
+    WHERE phone_number = ${phoneNumber}
+    LIMIT 1
+  `;
+  return Boolean(rows[0]);
+}
+
 export async function createPasswordUser(email: string, passwordHash: string, role: AccountRole, firstName: string, lastName: string) {
   await ensureSchema();
   const sql = database();
