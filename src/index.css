@@ -59,14 +59,11 @@ p { line-height: 1.5; color: var(--muted); }
 .notification-info-dialog .notification-info-note { color: var(--moss); font-size: 13px; font-weight: 700; }
 .notification-info-close { position: absolute; top: 19px; right: 19px; }
 .notification-onboarding-dialog { width: min(100%, 620px); }
-.notification-onboarding-dialog .eyebrow { margin-bottom: 12px; }
 .notification-onboarding-dialog h2 { font-size: clamp(1.9rem, 5vw, 2.7rem); }
 .notification-onboarding-dialog > p { max-width: 500px; }
 .notification-onboarding-enable { margin: 24px 0 0; }
 .notification-onboarding-warning { margin-top: 20px !important; padding: 13px 14px; border-left: 2px solid var(--clay); background: var(--mist); color: var(--ink) !important; }
 .notification-onboarding-dialog .auth-message { margin: 12px 0 0; }
-.notification-onboarding-later { margin-top: 22px; }
-.notification-onboarding-later-note { margin-top: 7px !important; font-size: 12px !important; }
 .profile-language-settings { align-items: center; }
 .profile-language-settings .profile-language-picker { width: 190px; margin: 0; flex: 0 0 auto; }
 .profile-language-settings .picker-trigger { min-height: 46px; }
