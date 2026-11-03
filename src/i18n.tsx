@@ -692,6 +692,7 @@ const CROATIAN: Record<string, string> = {
   "Download invoice": "Preuzmi račun",
   "No credit activity yet": "Još nema aktivnosti kredita",
   "Stripe credit purchase": "Kupnja kredita putem Stripea",
+  "Welcome bonus credits": "Besplatni krediti dobrodošlice",
   "Commission for confirmed transport": "Provizija za potvrđeni prijevoz",
   "Carrier profile": "Profil prijevoznika",
   "Customer reviews": "Recenzije korisnika",
