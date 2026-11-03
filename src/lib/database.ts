@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { GoogleIdentity } from "./google";
 import { requiredEnv } from "./config";
 import { isLanguage, type Language } from "./language";
@@ -8,6 +8,7 @@ export type AccountRole = "requester" | "transporter";
 
 const TRANSPORTER_WELCOME_CREDIT_CENTS = 1_500;
 const TRANSPORTER_WELCOME_CREDIT_DESCRIPTION = "Welcome bonus credits";
+const WELCOME_CREDIT_HASH_CONTEXT = "vanscout:welcome-credit:v1";
 
 export type AppUser = {
   id: string;
@@ -23,6 +24,14 @@ export type AppUser = {
 
 function database() {
   return neon(requiredEnv("DATABASE_URL"));
+}
+
+function welcomeCreditPhoneHash(phoneNumber: string) {
+  const normalizedPhoneNumber = phoneNumber.trim();
+  if (!normalizedPhoneNumber) throw new Error("A verified phone number is required for welcome credits");
+  return createHmac("sha256", requiredEnv("JWT_SECRET"))
+    .update(`${WELCOME_CREDIT_HASH_CONTEXT}:${normalizedPhoneNumber}`)
+    .digest("hex");
 }
 
 export function sqlClient() {
@@ -48,6 +57,7 @@ async function ensureSchema() {
         phone_number TEXT UNIQUE,
         phone_verified_at TIMESTAMPTZ,
         role TEXT NOT NULL DEFAULT 'requester' CHECK (role IN ('requester', 'transporter')),
+        welcome_credit_eligible BOOLEAN NOT NULL DEFAULT FALSE,
         preferred_language TEXT NOT NULL DEFAULT 'en' CHECK (preferred_language IN ('en', 'hr')),
         notification_prompt_pending BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -55,6 +65,7 @@ async function ensureSchema() {
       )
     `.then(async () => {
       await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS preferred_language TEXT NOT NULL DEFAULT 'en' CHECK (preferred_language IN ('en', 'hr'))`;
+      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS welcome_credit_eligible BOOLEAN NOT NULL DEFAULT FALSE`;
       // Existing accounts are not prompted retroactively. New accounts opt in
       // to the one-time onboarding prompt when they are created below.
       await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS notification_prompt_pending BOOLEAN NOT NULL DEFAULT FALSE`;
@@ -332,6 +343,27 @@ async function ensureSchema() {
       `;
       await sql`CREATE INDEX IF NOT EXISTS vanscout_credit_transactions_carrier_created_idx ON vanscout_credit_transactions (carrier_id, created_at DESC)`;
       await sql`
+        CREATE TABLE IF NOT EXISTS vanscout_welcome_credit_claims (
+          phone_hmac TEXT PRIMARY KEY,
+          claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      const existingWelcomeCreditRows = await sql`
+        SELECT DISTINCT user_account.phone_number
+        FROM vanscout_credit_transactions transaction
+        JOIN vanscout_users user_account ON user_account.id = transaction.carrier_id
+        WHERE transaction.amount_cents = ${TRANSPORTER_WELCOME_CREDIT_CENTS}
+          AND transaction.description = ${TRANSPORTER_WELCOME_CREDIT_DESCRIPTION}
+          AND user_account.phone_number IS NOT NULL
+      `;
+      for (const row of existingWelcomeCreditRows) {
+        await sql`
+          INSERT INTO vanscout_welcome_credit_claims (phone_hmac)
+          VALUES (${welcomeCreditPhoneHash(String(row.phone_number))})
+          ON CONFLICT (phone_hmac) DO NOTHING
+        `;
+      }
+      await sql`
         CREATE TABLE IF NOT EXISTS vanscout_messages (
           id TEXT PRIMARY KEY,
           offer_id TEXT NOT NULL REFERENCES vanscout_transport_offers(id) ON DELETE CASCADE,
@@ -582,16 +614,23 @@ export async function createGoogleUserWithPhone(identity: GoogleIdentity, role: 
   const normalizedFirstName = firstName.trim();
   const normalizedLastName = lastName.trim();
   const userId = randomUUID();
+  const phoneHmac = welcomeCreditPhoneHash(phoneNumber);
   const rows = await sql`
     WITH new_user AS (
-      INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role, notification_prompt_pending)
-      VALUES (${userId}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role}, TRUE)
+      INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role, welcome_credit_eligible, notification_prompt_pending)
+      VALUES (${userId}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role}, FALSE, TRUE)
       RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
-    ), welcome_account AS (
-      INSERT INTO vanscout_carrier_credit_accounts (carrier_id, balance_cents)
-      SELECT id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}
+    ), welcome_claim AS (
+      INSERT INTO vanscout_welcome_credit_claims (phone_hmac)
+      SELECT ${phoneHmac}
       FROM new_user
       WHERE role = 'transporter'
+      ON CONFLICT (phone_hmac) DO NOTHING
+      RETURNING phone_hmac
+    ), welcome_account AS (
+      INSERT INTO vanscout_carrier_credit_accounts (carrier_id, balance_cents)
+      SELECT ${userId}, ${TRANSPORTER_WELCOME_CREDIT_CENTS}
+      FROM welcome_claim
       RETURNING carrier_id
     ), welcome_credit AS (
       INSERT INTO vanscout_credit_transactions (id, carrier_id, amount_cents, kind, description)
@@ -641,20 +680,10 @@ export async function createPasswordUser(email: string, passwordHash: string, ro
   const userId = randomUUID();
   const rows = await sql`
     WITH new_user AS (
-      INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role, notification_prompt_pending)
-      VALUES (${userId}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role}, TRUE)
+      INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role, welcome_credit_eligible, notification_prompt_pending)
+      VALUES (${userId}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role}, ${role === "transporter"}, TRUE)
       ON CONFLICT (email) DO NOTHING
       RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
-    ), welcome_account AS (
-      INSERT INTO vanscout_carrier_credit_accounts (carrier_id, balance_cents)
-      SELECT id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}
-      FROM new_user
-      WHERE role = 'transporter'
-      RETURNING carrier_id
-    ), welcome_credit AS (
-      INSERT INTO vanscout_credit_transactions (id, carrier_id, amount_cents, kind, description)
-      SELECT ${randomUUID()}, carrier_id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}, 'adjustment', ${TRANSPORTER_WELCOME_CREDIT_DESCRIPTION}
-      FROM welcome_account
     )
     SELECT id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
     FROM new_user
@@ -717,11 +746,37 @@ export async function verifyEmail(tokenHash: string, email?: string) {
 export async function verifyUserPhone(userId: string, phoneNumber: string) {
   await ensureSchema();
   const sql = database();
+  const phoneHmac = welcomeCreditPhoneHash(phoneNumber);
   const rows = await sql`
-    UPDATE vanscout_users
-    SET phone_number = ${phoneNumber}, phone_verified_at = NOW(), updated_at = NOW()
-    WHERE id = ${userId}
-    RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    WITH eligible_user AS (
+      SELECT id, role, welcome_credit_eligible
+      FROM vanscout_users
+      WHERE id = ${userId}
+      FOR UPDATE
+    ), verified_user AS (
+      UPDATE vanscout_users
+      SET phone_number = ${phoneNumber}, phone_verified_at = NOW(), welcome_credit_eligible = FALSE, updated_at = NOW()
+      WHERE id IN (SELECT id FROM eligible_user)
+      RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    ), welcome_claim AS (
+      INSERT INTO vanscout_welcome_credit_claims (phone_hmac)
+      SELECT ${phoneHmac}
+      FROM eligible_user
+      WHERE role = 'transporter' AND welcome_credit_eligible
+      ON CONFLICT (phone_hmac) DO NOTHING
+      RETURNING phone_hmac
+    ), welcome_account AS (
+      INSERT INTO vanscout_carrier_credit_accounts (carrier_id, balance_cents)
+      SELECT ${userId}, ${TRANSPORTER_WELCOME_CREDIT_CENTS}
+      FROM welcome_claim
+      RETURNING carrier_id
+    ), welcome_credit AS (
+      INSERT INTO vanscout_credit_transactions (id, carrier_id, amount_cents, kind, description)
+      SELECT ${randomUUID()}, carrier_id, ${TRANSPORTER_WELCOME_CREDIT_CENTS}, 'adjustment', ${TRANSPORTER_WELCOME_CREDIT_DESCRIPTION}
+      FROM welcome_account
+    )
+    SELECT id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
+    FROM verified_user
   `;
   return rows[0] ? toUser(rows[0] as Record<string, unknown>) : null;
 }
