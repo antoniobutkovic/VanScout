@@ -4,8 +4,6 @@ const required = [
   "CRON_SECRET",
   "JWT_SECRET",
   "APP_URL",
-  "NEXT_PUBLIC_LEGAL_TAX_ID",
-  "NEXT_PUBLIC_LEGAL_CONTACT_PHONE",
 ];
 
 const errors = required.filter(name => !process.env[name]?.trim()).map(name => `${name} is missing`);
