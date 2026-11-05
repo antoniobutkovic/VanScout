@@ -60,6 +60,8 @@ async function ensureSchema() {
         welcome_credit_eligible BOOLEAN NOT NULL DEFAULT FALSE,
         preferred_language TEXT NOT NULL DEFAULT 'en' CHECK (preferred_language IN ('en', 'hr')),
         notification_prompt_pending BOOLEAN NOT NULL DEFAULT FALSE,
+        terms_accepted_at TIMESTAMPTZ,
+        terms_version TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -69,6 +71,8 @@ async function ensureSchema() {
       // Existing accounts are not prompted retroactively. New accounts opt in
       // to the one-time onboarding prompt when they are created below.
       await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS notification_prompt_pending BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE vanscout_users ADD COLUMN IF NOT EXISTS terms_version TEXT`;
       await sql`
         CREATE TABLE IF NOT EXISTS vanscout_email_verifications (
           token_hash TEXT PRIMARY KEY,
@@ -608,7 +612,7 @@ export async function upsertGoogleUser(identity: GoogleIdentity, role?: AccountR
   return toUser(rows[0] as Record<string, unknown>);
 }
 
-export async function createGoogleUserWithPhone(identity: GoogleIdentity, role: AccountRole, firstName: string, lastName: string, phoneNumber: string): Promise<AppUser> {
+export async function createGoogleUserWithPhone(identity: GoogleIdentity, role: AccountRole, firstName: string, lastName: string, phoneNumber: string, termsVersion: string): Promise<AppUser> {
   await ensureSchema();
   const sql = database();
   const normalizedFirstName = firstName.trim();
@@ -617,8 +621,8 @@ export async function createGoogleUserWithPhone(identity: GoogleIdentity, role: 
   const phoneHmac = welcomeCreditPhoneHash(phoneNumber);
   const rows = await sql`
     WITH new_user AS (
-      INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role, welcome_credit_eligible, notification_prompt_pending)
-      VALUES (${userId}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role}, FALSE, TRUE)
+      INSERT INTO vanscout_users (id, google_subject, email, name, first_name, last_name, avatar_url, email_verified_at, phone_number, phone_verified_at, role, welcome_credit_eligible, notification_prompt_pending, terms_accepted_at, terms_version)
+      VALUES (${userId}, ${identity.subject}, ${identity.email}, ${`${normalizedFirstName} ${normalizedLastName}`}, ${normalizedFirstName}, ${normalizedLastName}, ${identity.avatarUrl}, NOW(), ${phoneNumber}, NOW(), ${role}, FALSE, TRUE, NOW(), ${termsVersion})
       RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
     ), welcome_claim AS (
       INSERT INTO vanscout_welcome_credit_claims (phone_hmac)
@@ -690,15 +694,15 @@ export async function isPhoneNumberInUse(phoneNumber: string, excludingUserId?: 
   return Boolean(rows[0]);
 }
 
-export async function createPasswordUser(email: string, passwordHash: string, role: AccountRole, firstName: string, lastName: string) {
+export async function createPasswordUser(email: string, passwordHash: string, role: AccountRole, firstName: string, lastName: string, termsVersion: string) {
   await ensureSchema();
   const sql = database();
   const normalizedEmail = email.trim().toLowerCase();
   const userId = randomUUID();
   const rows = await sql`
     WITH new_user AS (
-      INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role, welcome_credit_eligible, notification_prompt_pending)
-      VALUES (${userId}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role}, ${role === "transporter"}, TRUE)
+      INSERT INTO vanscout_users (id, email, name, first_name, last_name, password_hash, role, welcome_credit_eligible, notification_prompt_pending, terms_accepted_at, terms_version)
+      VALUES (${userId}, ${normalizedEmail}, ${`${firstName.trim()} ${lastName.trim()}`}, ${firstName.trim()}, ${lastName.trim()}, ${passwordHash}, ${role}, ${role === "transporter"}, TRUE, NOW(), ${termsVersion})
       ON CONFLICT (email) DO NOTHING
       RETURNING id, email, name, first_name, last_name, avatar_url, role, phone_number, phone_verified_at
     )
