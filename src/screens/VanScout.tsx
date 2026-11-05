@@ -441,23 +441,22 @@ function TransportDetails({ request, customerName }: { request: TransportRequest
 }
 
 type LegalDocument = "privacy" | "cookies" | "terms" | "impressum";
-const LEGAL_DOCUMENTS: Record<LegalDocument, { title: string; introduction: string }> = {
-  privacy: { title: "Privacy policy", introduction: "Privacy policy introduction" },
-  cookies: { title: "Cookie policy", introduction: "Cookie policy introduction" },
-  terms: { title: "Terms of use", introduction: "Terms of use introduction" },
-  impressum: { title: "Impressum", introduction: "Impressum introduction" },
+const LEGAL_DOCUMENTS: Record<LegalDocument, { title: string }> = {
+  privacy: { title: "Privacy policy" },
+  cookies: { title: "Cookie policy" },
+  terms: { title: "Terms of use" },
+  impressum: { title: "Impressum" },
 };
 
 export function LegalPage({ document }: { document: LegalDocument }) {
   const { language, t } = useLanguage();
   const page = LEGAL_DOCUMENTS[document];
-  const isTermsPage = document === "terms";
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [document]);
 
-  return <div className="site"><Topbar /><main className="legal-page"><section className={`legal-intro${isTermsPage ? " legal-intro--terms" : ""}`}>{!isTermsPage && <p className="eyebrow">{t("Legal information")}</p>}<h1>{t(page.title)}</h1>{!isTermsPage && <p>{t(page.introduction)}</p>}</section><LegalDocumentContent document={document} language={language} /></main><Footer /></div>;
+  return <div className="site"><Topbar /><main className="legal-page"><section className="legal-intro"><h1>{t(page.title)}</h1></section><LegalDocumentContent document={document} language={language} /></main><Footer /></div>;
 }
 
 export function Home() {
