@@ -451,7 +451,13 @@ const LEGAL_DOCUMENTS: Record<LegalDocument, { title: string; introduction: stri
 export function LegalPage({ document }: { document: LegalDocument }) {
   const { language, t } = useLanguage();
   const page = LEGAL_DOCUMENTS[document];
-  return <div className="site"><Topbar /><main className="legal-page"><section className="legal-intro"><p className="eyebrow">{t("Legal information")}</p><h1>{t(page.title)}</h1><p>{t(page.introduction)}</p></section><LegalDocumentContent document={document} language={language} /></main><Footer /></div>;
+  const isTermsPage = document === "terms";
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [document]);
+
+  return <div className="site"><Topbar /><main className="legal-page"><section className={`legal-intro${isTermsPage ? " legal-intro--terms" : ""}`}>{!isTermsPage && <p className="eyebrow">{t("Legal information")}</p>}<h1>{t(page.title)}</h1>{!isTermsPage && <p>{t(page.introduction)}</p>}</section><LegalDocumentContent document={document} language={language} /></main><Footer /></div>;
 }
 
 export function Home() {
