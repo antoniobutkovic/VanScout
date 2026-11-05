@@ -26,6 +26,19 @@ npm install
 npm run dev
 ```
 
+## Legal launch configuration
+
+The verified operator identity displayed in the Privacy Policy and Impressum is the one published at Avero's Impressum: STRIVE, obrt za računalno programiranje, vl. Antonio Butković, Đakovo, Vinkovačka 13; Vinkovačka 13, 31400 Đakovo; Upravni odjel za gospodarstvo i turizam Đakovo (Đakovo), MBS 98284908. VanScout's designated legal and privacy contact is info@van-scout.com.
+
+Avero does not publish the OIB/VAT ID or telephone number. Configure these two public values from the operator's official records before a production build; the production compliance check deliberately fails while either is missing.
+
+```bash
+NEXT_PUBLIC_LEGAL_TAX_ID="OIB and, if applicable, VAT ID"
+NEXT_PUBLIC_LEGAL_CONTACT_PHONE="+385 ..."
+```
+
+Do not launch with placeholders. This is a product-specific Croatia/EU draft; a Croatian lawyer/accountant still needs to confirm the operator details, transport-law status, tax/fiscalisation and consumer rules for the final business model.
+
 The API is served by the same process under `/api`. There is no separate local
 backend process and no `VITE_API_BASE_URL` or `ALLOWED_ORIGINS` requirement.
 

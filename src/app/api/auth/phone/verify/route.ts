@@ -5,12 +5,14 @@ import { createGoogleUserWithPhone, verifyUserPhone } from "@/lib/database";
 import { verifiedFirebasePhoneNumber } from "@/lib/firebase-token";
 import { bearerToken, createSessionToken, setSessionCookie, verifyGoogleRegistrationToken } from "@/lib/session";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { TERMS_VERSION } from "@/lib/legal";
 
 const bodySchema = z.object({
   firebaseIdToken: z.string().min(100),
   role: z.enum(["requester", "transporter"]).optional(),
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().min(1).max(100).optional(),
+  termsAccepted: z.literal(true).optional(),
 });
 
 export async function POST(request: Request) {
@@ -29,11 +31,11 @@ export async function POST(request: Request) {
     const pendingToken = bearerToken(request);
     if (!pendingToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const identity = await verifyGoogleRegistrationToken(pendingToken);
-    if (!body.role || !body.firstName || !body.lastName) {
-      return NextResponse.json({ error: "Name and account type are required" }, { status: 400 });
+    if (!body.role || !body.firstName || !body.lastName || !body.termsAccepted) {
+      return NextResponse.json({ error: "Name, account type and acceptance of the Terms and Conditions are required" }, { status: 400 });
     }
     const phoneNumber = await verifiedFirebasePhoneNumber(body.firebaseIdToken);
-    const user = await createGoogleUserWithPhone(identity, body.role, body.firstName, body.lastName, phoneNumber);
+    const user = await createGoogleUserWithPhone(identity, body.role, body.firstName, body.lastName, phoneNumber, TERMS_VERSION);
     const token = await createSessionToken(user);
     return setSessionCookie(NextResponse.json({ user }), token);
   } catch (error) {
