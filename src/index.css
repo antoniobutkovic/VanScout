@@ -1102,7 +1102,8 @@ body:has(.profile-settings-page) .app-topbar { border-bottom: 0 !important; }
 .legal-policy dt { font-weight: 700; }
 .legal-policy dd { margin: 0; }
 .auth .legal-acceptance { display: flex; align-items: flex-start; gap: 10px; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.legal-acceptance input { margin-top: 4px; flex: 0 0 auto; }
+.auth .legal-acceptance input[type="checkbox"] { width: 18px; height: 18px; margin: 2px 0 0; padding: 0; flex: 0 0 18px; accent-color: var(--moss); }
+.auth .legal-acceptance span { min-width: 0; }
 .legal-acceptance a { color: var(--moss); text-decoration: underline; }
 
 /* Compact layouts keep every workspace destination and action available. */
