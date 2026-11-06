@@ -234,7 +234,7 @@ function HeaderActions({ kind }: { kind?: "customer" | "carrier" }) {
     await clearAuthSession();
     nav("/", { replace: true });
   };
-  return <div className="nav-actions">{kind ? <>{kind === "customer" && <Link className="button dark short" to="/create-request" state={{ returnTo: "/customer" }}>{t("New request")}</Link>}<LanguagePicker /><button type="button" className="logout-button" onClick={() => void logout()}>{t("Log out")}</button></> : <><LanguagePicker compact={false} className="topbar-language-picker" /><Link className="button ghost sign-in" to="/auth">{t("Sign in")}</Link></>}</div>;
+  return <div className="nav-actions">{kind ? <>{kind === "customer" && <Link className="button dark short" to="/create-request" state={{ returnTo: "/customer" }}>{t("New request")}</Link>}<button type="button" className="logout-button" onClick={() => void logout()}>{t("Log out")}</button></> : <><LanguagePicker compact={false} className="topbar-language-picker" /><Link className="button ghost sign-in" to="/auth">{t("Sign in")}</Link></>}</div>;
 }
 
 function useHasMessages(kind?: "customer" | "carrier") {
