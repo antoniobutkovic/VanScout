@@ -112,7 +112,7 @@ p { line-height: 1.5; color: var(--muted); }
 .hero-image > img { width: 100%; height: 100%; object-fit: cover; object-position: right center; }
 .hero-image::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 47%, rgba(22,30,19,.42)); pointer-events: none; }
 
-.hero-sticker { z-index: 2; position: absolute; right: 22px; top: 23px; width: 205px; background: rgba(255,253,248,.96); padding: 15px; display: grid; gap: 10px; font-size: 11px; }
+.hero-sticker { z-index: 2; position: absolute; right: 22px; top: 23px; width: 205px; background: rgba(255,253,248,.96); border: 1px solid var(--stone); border-radius: 16px; padding: 15px; display: grid; gap: 10px; font-size: 11px; }
 .hero-sticker > span { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: 9px; }
 .hero-sticker b { line-height: 1.2; font-size: 11px; }
 
