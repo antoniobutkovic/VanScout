@@ -783,15 +783,17 @@ export function useLanguage() {
   return context;
 }
 
-export function LanguagePicker() {
+export function LanguagePicker({ compact = false, className = "" }: { compact?: boolean; className?: string }) {
   const { language, setLanguage, t } = useLanguage();
-  const options = [{ value: "en", label: "🇬🇧" }, { value: "hr", label: "🇭🇷" }];
+  const options = compact
+    ? [{ value: "en", label: "🇬🇧" }, { value: "hr", label: "🇭🇷" }]
+    : [{ value: "en", label: t("English") }, { value: "hr", label: t("Croatian") }];
   return <Picker
-    className="language-picker"
+    className={[compact ? "language-picker" : "full-language-picker", className].filter(Boolean).join(" ")}
     options={options}
     value={language}
     ariaLabel={t("Language")}
     onChange={(value) => setLanguage(value as Language)}
-    renderValue={(option) => option?.label}
+    renderValue={compact ? (option) => option?.label : undefined}
   />;
 }
