@@ -10,7 +10,7 @@ import { Picker } from "../components/Picker";
 import { AddressPicker } from "../components/AddressPicker";
 import { LegalDocumentContent } from "../components/LegalDocumentContent";
 import { getFirebasePhoneAuth, type FirebasePhoneConfig } from "../lib/firebase-phone";
-import { firebasePhoneError, isInvalidPhoneError, phoneVerificationApiError } from "../lib/firebase-phone-error";
+import { firebasePhoneError, isInvalidPhoneError, isRecaptchaError, phoneVerificationApiError } from "../lib/firebase-phone-error";
 import { normalizePhoneNumber } from "../lib/phone-number";
 import { clearAuthSession, dashboardPath, fetchSessionUser, getAuthToken } from "../lib/client-auth";
 import { clearPendingRequestImages, loadPendingRequestImages, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, pendingImagesFromFiles, savePendingRequestImages, syncPendingRequestImages, type PendingRequestImage } from "../lib/request-image-drafts";
@@ -714,6 +714,7 @@ export function Registration() {
   const [localNumber, setLocalNumber] = useState("");
   const [pendingPhoneNumber, setPendingPhoneNumber] = useState("");
   const [phoneError, setPhoneError] = useState("");
+  const [showVisibleRecaptcha, setShowVisibleRecaptcha] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [googleRegistrationToken, setGoogleRegistrationToken] = useState("");
   const emailResendCooldown = useEmailResendCooldown(Boolean(verificationEmail));
@@ -875,6 +876,7 @@ export function Registration() {
     event.preventDefault();
     setSubmitting(true); setPhoneError(""); setAuthError(""); setMessage("");
     let codeWasSent = false;
+    let phoneNumber = "";
     try {
       const authorizationToken = googleRegistrationToken || getAuthToken();
       const configResponse = await fetch("/api/auth/config", { cache: "no-store" });
@@ -883,7 +885,7 @@ export function Registration() {
         setAuthError(phoneVerificationApiError("Phone verification unavailable", t, "send"));
         return;
       }
-      const phoneNumber = normalizePhoneNumber(country, localNumber, configPayload.firebase.testMode);
+      phoneNumber = normalizePhoneNumber(country, localNumber, configPayload.firebase.testMode) || "";
       if (!phoneNumber) return setPhoneError(t("Enter a valid mobile number for the selected country"));
 
       const validationResponse = await fetch("/api/auth/phone/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorizationToken}` }, body: JSON.stringify({ phoneNumber }) });
@@ -902,14 +904,40 @@ export function Registration() {
       firebaseAuth.current = auth;
 
       recaptchaVerifier.current?.clear();
-      const verifier = new RecaptchaVerifier(auth, "firebase-phone-recaptcha", { size: "invisible" });
+      const verifier = new RecaptchaVerifier(auth, "firebase-phone-recaptcha", { size: showVisibleRecaptcha ? "normal" : "invisible" });
       recaptchaVerifier.current = verifier;
+      if (showVisibleRecaptcha) await verifier.render();
       confirmationResult.current = await signInWithPhoneNumber(auth, phoneNumber, verifier);
       codeWasSent = true;
+      setShowVisibleRecaptcha(false);
       setPendingPhoneNumber(phoneNumber);
       setAuthStage("phone-code");
       setMessage(configPayload.firebase.testMode ? "" : t("We sent a six-digit code to your phone."));
     } catch (error) {
+      // Some browsers reject an invisible reCAPTCHA token even though the
+      // badge loaded. Retry this same request with a visible challenge, so
+      // the customer can complete it rather than having to diagnose it.
+      if (!showVisibleRecaptcha && phoneNumber && isRecaptchaError(error) && firebaseAuth.current) {
+        try {
+          setShowVisibleRecaptcha(true);
+          recaptchaVerifier.current?.clear();
+          const verifier = new RecaptchaVerifier(firebaseAuth.current, "firebase-phone-recaptcha", { size: "normal" });
+          recaptchaVerifier.current = verifier;
+          await verifier.render();
+          confirmationResult.current = await signInWithPhoneNumber(firebaseAuth.current, phoneNumber, verifier);
+          codeWasSent = true;
+          setShowVisibleRecaptcha(false);
+          setPendingPhoneNumber(phoneNumber);
+          setAuthStage("phone-code");
+          setMessage(t("We sent a six-digit code to your phone."));
+          return;
+        } catch (visibleRecaptchaError) {
+          error = visibleRecaptchaError;
+          setShowVisibleRecaptcha(true);
+        }
+      } else if (isRecaptchaError(error)) {
+        setShowVisibleRecaptcha(true);
+      }
       const message = firebasePhoneError(error, t, "send");
       if (isInvalidPhoneError(error)) setPhoneError(message);
       else setAuthError(message);

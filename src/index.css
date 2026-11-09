@@ -337,6 +337,7 @@ textarea { min-height: 105px; resize: vertical; }
 .auth-error, .auth-message { margin: 14px 0 0; font-size: 12px; line-height: 1.45; }
 .auth-error, .auth-message.error { color: var(--red); }
 .auth-message.success { color: var(--moss); }
+.firebase-phone-recaptcha { min-height: 0; margin-top: 14px; }
 .google-sign-in { width: 100%; min-height: 52px; }
 .google-sign-in > div { width: 100%; min-height: 52px; display: flex; justify-content: center; }
 .google-sign-in [role="button"] { width: 100% !important; max-width: none !important; height: 44px !important; }
