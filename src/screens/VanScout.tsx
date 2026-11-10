@@ -1,3 +1,4 @@
+import { prepareProfileImage } from "../lib/profile-image-upload";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type InputHTMLAttributes, type KeyboardEvent } from "react";
 import Image from "next/image";
 import { Realtime, type TokenRequest } from "ably";
@@ -2307,6 +2308,7 @@ function CarrierProfileEditor() {
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     const token = getAuthToken();
     if (!token) return;
@@ -2341,23 +2343,35 @@ function CarrierProfileEditor() {
       setError(t("Enter your company name"));
       return;
     }
-    const form = new FormData();
-    form.set("companyName", companyName.trim()); form.set("bio", bio.trim());
-    if (profileImage) form.set("profileImage", profileImage);
-    const galleryChanged = files.length > 0 || imageIds.join(",") !== (profile?.imageIds || []).join(",");
-    if (galleryChanged) {
-      form.set("galleryChanged", "true");
-      imageIds.forEach(id => form.append("retainedImageIds", id));
-      files.forEach(file => form.append("images", file));
-    }
-    const response = await fetch("/api/carrier-profile", { method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: form });
-    const payload = await response.json() as { profile?: CarrierProfileData; error?: string };
-    if (!response.ok || !payload.profile) { setError(payload.error || t("Unable to save profile")); return; }
-    setProfile(payload.profile);
-    setProfileImage(null);
-    setImageIds(payload.profile.imageIds);
-    setFiles([]);
+    if (saving) return;
+    setSaving(true);
     setError("");
+    try {
+      const preparedProfile = profileImage ? await prepareProfileImage(profileImage) : null;
+      const preparedImages = await Promise.all(files.map(prepareProfileImage));
+      const form = new FormData();
+      form.set("companyName", companyName.trim()); form.set("bio", bio.trim());
+      if (preparedProfile) form.set("profileImage", preparedProfile);
+      const galleryChanged = files.length > 0 || imageIds.join(",") !== (profile?.imageIds || []).join(",");
+      if (galleryChanged) {
+        form.set("galleryChanged", "true");
+        imageIds.forEach(id => form.append("retainedImageIds", id));
+        preparedImages.forEach(file => form.append("images", file));
+      }
+      const response = await fetch("/api/carrier-profile", { method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: form });
+      if (response.status === 413) throw new Error(t("The images are too large to upload. Try smaller images."));
+      const payload = await response.json() as { profile?: CarrierProfileData; error?: string };
+      if (!response.ok || !payload.profile) throw new Error(payload.error || t("Unable to save profile"));
+      setProfile(payload.profile);
+      setProfileImage(null);
+      setImageIds(payload.profile.imageIds);
+      setFiles([]);
+    } catch (saveError) {
+      const message = saveError instanceof Error && saveError.message !== "invalid_image" && !saveError.message.startsWith("image_") ? saveError.message : t("Unable to prepare this image. Try a JPEG or PNG image.");
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
   };
   const initials = profile?.carrierName.split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "";
   const profileChanged = profile !== null && (companyName.trim() !== profile.companyName || bio.trim() !== profile.bio || profileImage !== null || files.length > 0 || imageIds.join(",") !== profile.imageIds.join(","));
@@ -2378,7 +2392,7 @@ function CarrierProfileEditor() {
       </div>
       {error && <p className="transport-list-message error">{error}</p>}
     </form>
-    {profileChanged && <div className="profile-save-float"><button className="button moss" type="submit" form="carrier-profile-form">{t("Save profile")}</button></div>}
+    {profileChanged && <div className="profile-save-float"><button className="button moss" type="submit" form="carrier-profile-form" disabled={saving}>{saving ? t("Saving…") : t("Save profile")}</button></div>}
     {profile && <CarrierReviews profile={profile} />}
     <VehicleManager vehicles={profile?.vehicles || []} onChange={vehicles => setProfile(current => current ? { ...current, vehicles } : current)} />
     <DeleteAccountControl />
