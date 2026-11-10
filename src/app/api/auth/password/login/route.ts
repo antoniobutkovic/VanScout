@@ -3,6 +3,7 @@ import { z } from "zod";
 import { findUserByEmailWithPassword } from "@/lib/database";
 import { verifyPassword } from "@/lib/password";
 import { createSessionToken, setSessionCookie } from "@/lib/session";
+import { authLogContext, logAuthEvent, safeErrorName } from "@/lib/auth-log";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
@@ -11,22 +12,33 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const context = await authLogContext(request);
   const rate = checkRateLimit(request, "password-login", 10, 15 * 60 * 1000);
-  if (!rate.allowed) return NextResponse.json({ error: "Too many sign-in attempts. Try again later." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
+  if (!rate.allowed) {
+    logAuthEvent(context, "password_login", "rate_limited", { status: 429, retryAfterSeconds: rate.retryAfterSeconds });
+    return NextResponse.json({ error: "Too many sign-in attempts. Try again later." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
+  }
   try {
     const body = bodySchema.parse(await request.json());
     const account = await findUserByEmailWithPassword(body.email);
     if (!account?.passwordHash || !(await verifyPassword(body.password, account.passwordHash))) {
+      logAuthEvent(context, "password_login", "invalid_credentials", { status: 401 });
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
     if (!account.emailVerified) {
+      logAuthEvent(context, "password_login", "email_not_verified", { status: 403 });
       return NextResponse.json({ code: "EMAIL_NOT_VERIFIED", error: "Please verify your email before signing in" }, { status: 403 });
     }
 
     const token = await createSessionToken(account.user);
+    logAuthEvent(context, "password_login", "signed_in", { status: 200 });
     return setSessionCookie(NextResponse.json({ user: account.user }), token);
   } catch (error) {
-    if (error instanceof z.ZodError) return NextResponse.json({ error: "Invalid email or password" }, { status: 400 });
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      logAuthEvent(context, "password_login", "invalid_input", { status: 400 });
+      return NextResponse.json({ error: "Invalid email or password" }, { status: 400 });
+    }
+    logAuthEvent(context, "password_login", "failed", { status: 500, errorName: safeErrorName(error) });
     return NextResponse.json({ error: "Unable to sign in" }, { status: 500 });
   }
 }

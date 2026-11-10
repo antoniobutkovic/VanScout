@@ -793,8 +793,13 @@ export function Registration() {
       const payload = await response.json() as { token?: string; email?: string; user?: AuthenticatedUser; error?: string; code?: string };
       if (!response.ok) {
         if (payload.code === "EMAIL_NOT_VERIFIED") {
-          await fetch("/api/auth/email/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+          const resendResponse = await fetch("/api/auth/email/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+          const resendPayload = await resendResponse.json() as { error?: string };
           setAuthStage("email-code");
+          if (!resendResponse.ok) {
+            setAuthError(resendPayload.error || t("Unable to send verification email"));
+            return;
+          }
           emailResendCooldown.start();
           return;
         }
